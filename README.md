@@ -29,7 +29,7 @@ other runtime dependencies.
 ## Installation
 
 TTNumPy requires Python 3.10 or newer. Its only runtime dependencies are
-NumPy (>= 2.1) and SciPy (>= 1.15).
+NumPy and SciPy .
 
 ```bash
 python -m pip install .
@@ -45,6 +45,19 @@ The `docs` extra installs only the documentation toolchain:
 
 ```bash
 python -m pip install -e '.[docs]'
+```
+
+The `benchmark` extra installs all needed packages for benchmarking:
+
+```bash
+python -m pip install -e '.[benchmark]'
+```
+This adds PyAMG and PETSc on top of the runtime requirements. PETSc has no
+prebuilt wheels and is compiled from source, so it needs BLAS and LAPACK
+development headers on the system — on Debian or Ubuntu:
+
+```bash
+sudo apt-get install -y libopenblas-dev liblapack-dev
 ```
 
 Check the installation:
@@ -127,6 +140,51 @@ re-exported from the top level, so `tt.mals(...)` reaches them directly.
 
 `ttnumpy.utils` contains lower-level helpers for tensor norms,
 orthonormalization and SVD-based truncation.
+
+## Benchmarks
+
+The `benchmarks/` directory holds a runner that measures the tensor-train
+solvers against classical sparse baselines on the Poisson equation
+$-\Delta u = f$ on the unit square, discretized with finite differences and
+solved on a $2^n \times 2^n$ grid.
+
+### Running
+
+```bash
+python -m benchmarks.poisson --sizes 5 6 --output-dir benchmark-results
+```
+
+Useful options — `--help` lists them all:
+
+| Option | Meaning |
+| --- | --- |
+| `--sizes N [N ...]` | QTT depths per axis to run; the grid is $2^n \times 2^n$ |
+| `-n N` | A single depth instead of a suite |
+| `--tolerance` | Target relative residual for every iterative solver |
+| `--mode-size` | Tensorization of the TT operator; 2 is QTT, $2^k$ fuses $k$ cores |
+| `--max-rank`, `--max-sweeps`, `--kickrank` | Bond-dimension cap and TT solver limits |
+| `--no-reference` | Skip the sparse direct reference solve; error columns become `n/a` |
+| `--output-dir` | Where the Markdown and JSON reports are written |
+
+### What it reports
+
+One column per backend — the two TT solvers, SciPy CG, SciPy CG with PyAMG
+preconditioning, and PETSc CG with GAMG — and one block of rows per grid size:
+
+The five rows are:
+
+- **real time (s)** — wall-clock time for that backend's solve.
+- **err vs exact** — relative error against the sparse direct solution, so the
+  accuracy actually achieved rather than the accuracy requested.
+- **rel residual** — relative residual $\|Ax - b\| / \|b\|$, the quantity the
+  iterative solvers stop on.
+- **status** — how the solve ended. The TT solvers report `converged`,
+  `stagnated` or `max_sweeps`; the classical ones report `converged` or
+  `cg info=<code>`. A backend that exceeds the 600 s per-solve budget is
+  reported as `timeout>600s`, and one that raises is reported as
+  `failed: <ExceptionType>`, so a single bad backend never aborts the suite.
+- **notes** — what the backend did to get there: sweeps and the largest bond
+  dimension reached for the TT solvers, iteration count for the classical ones.
 
 ## Development
 
