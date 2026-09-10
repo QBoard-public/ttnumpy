@@ -1,0 +1,51 @@
+name: Poisson benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      sizes:
+        description: "QTT depths per axis to benchmark (space separated)"
+        type: string
+        required: false
+        default: "7 8 9 10"
+
+jobs:
+
+  poisson-benchmarks:
+    name: Poisson benchmarks
+    runs-on: cpu
+    # Reported for information: a slow or timed-out backend must not fail CI.
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install BLAS and LAPACK development libraries
+        run: |
+          if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=; fi
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends libopenblas-dev liblapack-dev
+
+      - name: Install the package and benchmark extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[benchmark]'
+
+      - name: Run the Poisson benchmarks
+        run: python -m benchmarks.poisson --sizes ${{ gitverse.event.inputs.sizes }} --output-dir benchmark-results
+
+      - name: Upload the benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+          retention-days: 30
