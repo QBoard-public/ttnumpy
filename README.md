@@ -16,7 +16,7 @@ other runtime dependencies.
 - **Tensor train container.** `TensorTrain` holds both the TT and the TTM
   format, tracking bond dimensions, canonical form and the position of the
   orthogonality centre.
-- **Constructors.** TT-SVD decomposition of a full tensor, plus `ones`,
+- **Constructors.** TT-SVD decomposition of a full tensor, `ones`,
   `zeros`, `eye`, `rand` and `canonical_tt`.
 - **Arithmetic.** Addition, element-wise and scalar multiplication,
   matrix-by-vector and matrix-by-matrix products, transposition and
@@ -169,7 +169,7 @@ Useful options — `--help` lists them all:
 ### What it reports
 
 One column per backend — the two TT solvers, SciPy CG, SciPy CG with PyAMG
-preconditioning, and PETSc CG with GAMG — and one block of rows per grid size:
+preconditioning, and PETSc CG with GAMG — and one block of rows per grid size.
 
 The five rows are:
 
