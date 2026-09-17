@@ -26,7 +26,7 @@ Before contributing to this project you should see [README](README.md).
 - [Tests](#tests)
 - [Documentation](#documentation)
 - [Commit Messages](#commit-messages)
-- [Creating a Merge Request](#creating-a-merge-request)
+- [Creating a Pull Request](#creating-a-pull-request)
 - [Continuous Integration (CI) Requirements](#continuous-integration-ci-requirements)
 - [Review Process](#review-process)
 - [Need Help?](#need-help)
@@ -104,7 +104,7 @@ docs/<short_description>
 hotfix/<short_description>
 ```
 
-Do not commit directly to the `main` branch.
+Do not commit directly to the `master` branch.
 
 ---
 
@@ -134,7 +134,7 @@ python -m sphinx -b html -W docs docs/_build/html
 ```
 
 `-W` turns warnings into errors, and `conf.py` sets `nitpicky = True`, so an
-unresolvable cross-reference fails the build. Run it before opening a merge
+unresolvable cross-reference fails the build. Run it before opening a pull
 request when your change touches docstrings or documentation.
 
 Code examples in the documentation are expected to run as written. If you add
@@ -161,15 +161,15 @@ ci: update CI configuration
 
 ---
 
-## Creating a Merge Request
+## Creating a Pull Request
 
 When your work is ready:
 
 1. Push your branch to the project repository.
-2. Open a Merge Request targeting the `main` branch.
+2. Open a Pull Request targeting the `master` branch.
 3. Provide a clear description of your changes.
 
-Your merge request should include:
+Your pull request should include:
 
 - a summary of the changes;
 - testing performed;
@@ -179,7 +179,7 @@ Your merge request should include:
 
 ## Continuous Integration (CI) Requirements
 
-Every Merge Request is automatically validated by the project's Continuous
+Every Pull Request is automatically validated by the project's Continuous
 Integration (CI) pipeline.
 
 Before requesting a review, ensure that:
@@ -190,7 +190,7 @@ Before requesting a review, ensure that:
 - `pylint` stays at or above the configured score;
 - documentation is updated when applicable.
 
-Merge Requests with failing CI checks will not be merged until all required
+Pull Requests with failing CI checks will not be merged until all required
 checks have passed.
 
 ---
@@ -208,10 +208,10 @@ During the review process, maintainers evaluate:
 - test coverage;
 - documentation updates.
 
-Contributors are expected to address review comments and update their Merge
+Contributors are expected to address review comments and update their Pull
 Requests accordingly.
 
-A Merge Request may be merged only after receiving the required approvals and
+A Pull Request may be merged only after receiving the required approvals and
 successfully passing all mandatory CI checks.
 
 ---

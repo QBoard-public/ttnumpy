@@ -253,7 +253,7 @@ not call `setup_logging`; use `pytest --log-cli-level=DEBUG` instead.
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-development setup, coding conventions and merge request workflow.
+development setup, coding conventions and pull request workflow.
 
 ## License
 
