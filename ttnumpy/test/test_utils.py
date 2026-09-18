@@ -90,6 +90,28 @@ class TestTruncatedBond(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     utils.truncated_bond(self.SINGULAR_VALUES, 1.0, max_rank=max_rank)
 
+    def test_discards_a_noise_level_tail_even_with_a_zero_budget(self):
+        """A rank-deficient spectrum carries noise where its zeros are."""
+        self.assertEqual(utils.truncated_bond(np.array([1.0, 1e-17, 3e-18]), 0.0), 1)
+
+    def test_the_bond_does_not_follow_what_lapack_left_in_the_noise(self):
+        """Four forms of a mathematically zero tail give the same bond."""
+        # forms different BLAS builds report; before the cutoff: bonds 3, 1, 2, 3
+        for tail in ([1e-17, 3e-18], [0.0, 0.0], [5e-17, 0.0], [1e-20, 1e-160]):
+            with self.subTest(tail=tail):
+                values = np.array([1.0, *tail])
+                self.assertEqual(utils.truncated_bond(values, 0.0), 1)
+
+    def test_the_noise_cutoff_is_relative_to_the_largest_value(self):
+        """The cutoff is a fraction of ``singular_values[0]``, not an absolute."""
+        # for two values led by 1e8 the cutoff is 4.4e-08
+        self.assertEqual(utils.truncated_bond(np.array([1e8, 1e-9]), 0.0), 1)
+        self.assertEqual(utils.truncated_bond(np.array([1e8, 1e-5]), 0.0), 2)
+
+    def test_the_noise_cutoff_leaves_a_well_scaled_spectrum_alone(self):
+        """For this spectrum the cutoff is 3.6e-15 and the smallest value 0.5."""
+        self.assertEqual(utils.truncated_bond(self.SINGULAR_VALUES, 0.0), 4)
+
 
 class TestOrthonormalize(unittest.TestCase):
     """QR sweeps must orthonormalize without changing the tensor."""

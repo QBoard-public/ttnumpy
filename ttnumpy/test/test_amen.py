@@ -269,7 +269,9 @@ class TestAmen(unittest.TestCase):
         ) / h**2
         exact = np.linalg.solve(laplacian, np.ones(size))
 
-        guess = tensor_train.ones([2] * order, ranks=1).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=1).orthonormalize(
+            canonical="right"
+        )
         solution, info = amen(
             laplacian_tt,
             rhs_tt,

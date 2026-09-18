@@ -337,7 +337,7 @@ def solve_poisson_tt(
         raise ValueError(f"solver must be one of 'mals', 'amen', 'als'; got {solver!r}")
 
     # the initial guess follows the tensorization of the right-hand side
-    initial = tt.ones(problem.rhs_qtt.physical_dims(), ranks=3).compress_svd(
+    initial = tt.ones(problem.rhs_qtt.physical_dims(), ranks=3).orthonormalize(
         canonical="right"
     )
     # the discrete Laplacian is symmetric, so "auto" picks MINRES

@@ -26,5 +26,7 @@ def qtt_laplacian_1d(order):
         error=0,
     )
     rhs_tt = tensor_train.ones([2] * order)
-    initial_tt = tensor_train.ones([2] * order, ranks=3).compress_svd(canonical="right")
+    initial_tt = tensor_train.ones([2] * order, ranks=3).orthonormalize(
+        canonical="right"
+    )
     return laplacian_tt, rhs_tt, initial_tt

@@ -5,6 +5,9 @@ from typing import List, Optional
 import numpy as np
 from scipy.linalg import qr, rq, svd
 
+#: Relative cutoff below which a singular value is rounding noise rather than content.
+_SVD_RTOL = np.finfo(float).eps
+
 
 def tensor_norm(tensor: np.ndarray) -> float:
     """Frobenius tensor norm."""
@@ -40,7 +43,13 @@ def truncated_bond(
     """
     if max_rank is not None and max_rank <= 0:
         raise ValueError("max_rank must be a positive integer.")
-    squares = np.asarray(singular_values, dtype=float) ** 2
+    values = np.asarray(singular_values, dtype=float)
+    # LAPACK reports a zero singular value anywhere between eps * sigma_max and
+    # exactly zero, so with delta=0 an untouched tail makes the bond follow the
+    # build rather than the matrix
+    if values.size:
+        values = np.where(values <= _SVD_RTOL * values.size * values[0], 0.0, values)
+    squares = values**2
     tail = np.concatenate([np.cumsum(squares[::-1])[::-1], [0.0]])
     bond = max(1, int(np.searchsorted(-tail, -(delta * delta), side="left")))
     if max_rank is not None:

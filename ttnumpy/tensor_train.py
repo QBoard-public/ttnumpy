@@ -1082,13 +1082,11 @@ def ones(
 ) -> TensorTrain:
     """Create a tensor train filled with ones.
 
-    Parameters
-    ----------
-    physical_indexes : List[int] or List[Tuple[int]]
-        List of physical dimensions for each core. For Tensor Train Matrix,
-        each physical dimension should be a tuple of (row_dim, col_dim).
-    ranks : int or list[int], optional
-        list of TT ranks, default is [1, ..., 1]
+    Args:
+        physical_indexes: List of physical dimensions for each core. For
+            Tensor Train Matrix, each physical dimension should be a tuple
+            of (row_dim, col_dim).
+        ranks: List of TT ranks. Defaults to [1, ..., 1].
 
     Returns:
         TensorTrain: Tensor train filled with ones.
@@ -1122,13 +1120,11 @@ def zeros(
 ) -> TensorTrain:
     """Create a tensor train filled with zeros.
 
-    Parameters
-    ----------
-    physical_indexes : List[int] or List[Tuple[int]]
-        List of physical dimensions for each core. For Tensor Train Matrix,
-        each physical dimension should be a tuple of (row_dim, col_dim).
-    ranks : int or list[int], optional
-        list of TT ranks, default is [1, ..., 1]
+    Args:
+        physical_indexes: List of physical dimensions for each core. For
+            Tensor Train Matrix, each physical dimension should be a tuple
+            of (row_dim, col_dim).
+        ranks: List of TT ranks. Defaults to [1, ..., 1].
 
     Returns:
         TensorTrain: Tensor train filled with zeros.
@@ -1159,11 +1155,9 @@ def zeros(
 def eye(physical_indexes: List[int]) -> TensorTrain:
     """Create an identity tensor train.
 
-    Parameters
-    ----------
-    physical_indexes : List[int]
-        List of physical dimensions for each core. Row and column dimensions
-        are the same. All ranks are 1.
+    Args:
+        physical_indexes: List of physical dimensions for each core. Row and
+            column dimensions are the same. All ranks are 1.
 
     Returns:
         TensorTrain: Identity tensor train.
@@ -1189,13 +1183,11 @@ def rand(
 ) -> TensorTrain:
     """Create a random tensor train.
 
-    Parameters
-    ----------
-    physical_indexes : List[int] or List[Tuple[int]]
-        List of physical dimensions for each core. For Tensor Train Matrix,
-        each physical dimension should be a tuple of (row_dim, col_dim).
-    ranks : int or list[int], optional
-        list of TT ranks, default is [1, ..., 1]
+    Args:
+        physical_indexes: List of physical dimensions for each core. For
+            Tensor Train Matrix, each physical dimension should be a tuple
+            of (row_dim, col_dim).
+        ranks: List of TT ranks. Defaults to [1, ..., 1].
 
     Returns:
         TensorTrain: Random tensor train.
@@ -1237,12 +1229,10 @@ def canonical_tt(physical_indexes: List[int], max_rank: int) -> TensorTrain:
     number of basis states on either side of the cut, so the left and right
     halves always meet with matching bond dimensions.
 
-    Parameters
-    ----------
-    physical_indexes : List[int]
-        List of physical dimensions for each core. Tensor Train Matrix format is not supported.
-    max_rank : int
-        Maximum rank of the TT decomposition.
+    Args:
+        physical_indexes: List of physical dimensions for each core. Tensor
+            Train Matrix format is not supported.
+        max_rank: Maximum rank of the TT decomposition.
 
     Returns:
         TensorTrain: Canonical tensor train.

@@ -314,7 +314,9 @@ class TestSolversCommon(unittest.TestCase):
         laplacian_tt, rhs_tt, _ = qtt_laplacian_1d(order)
         # rank 2 cannot represent the rank-3 solution, so ALS never reaches
         # the target and every sweep runs in full
-        guess = tensor_train.ones([2] * order, ranks=2).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=2).orthonormalize(
+            canonical="right"
+        )
         shared = dict(
             residual_tol=1e-6,
             local_rtol=1e-8,
@@ -858,7 +860,7 @@ def test_solver_handles_a_zero_right_hand_side(solver):
 
     A, _, _ = qtt_laplacian_1d(4)
     zero_rhs = tensor_train.zeros([2] * 4)
-    guess = tensor_train.ones([2] * 4, ranks=2).compress_svd(canonical="right")
+    guess = tensor_train.ones([2] * 4, ranks=2).orthonormalize(canonical="right")
 
     solution, info = solver(
         A, zero_rhs, x0=guess, max_sweeps=3, symmetric=True, return_info=True
@@ -923,7 +925,7 @@ def test_rank_adaptive_solver_truncates_a_zero_local_solution(rank_adaptive_solv
 
     A, _, _ = qtt_laplacian_1d(4)
     zero_rhs = tensor_train.zeros([2] * 4)
-    guess = tensor_train.ones([2] * 4, ranks=2).compress_svd(canonical="right")
+    guess = tensor_train.ones([2] * 4, ranks=2).orthonormalize(canonical="right")
 
     solution, info = rank_adaptive_solver(
         A,

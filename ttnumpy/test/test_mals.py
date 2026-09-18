@@ -16,164 +16,157 @@ DECIMAL = 10
 class TestMals(unittest.TestCase):
     """Tests for the MALS solver and its two-site local algebra."""
 
-    def test_tt_mals(self):
-        """Test MALS algorithm for solving linear systems in TT format."""
+    # order 8 bounds the exact (error=0) TT decompositions: the random operator
+    # below has no TT structure and reaches bond 2**(ORDER/2)
+    ORDER = 8
 
-        # order 8 keeps the exact (error=0) TT decompositions of the explicit
-        # test matrices small enough for CI memory limits
-        order = 8
+    def _solution_error(self, solution, reference):
+        """Relative error of the solved vector against a dense reference."""
+        vector = solution.get_full_tensor().reshape(-1)
+        return np.linalg.norm(reference - vector) / np.linalg.norm(reference)
 
-        # ------------- TOEPLITZ MATRIX -------------#
-        # generate Toeplitz matrix
-        toeplitz_mat = sp.linalg.toeplitz(
-            np.arange(1, 2**order + 1), np.arange(1, 2**order + 1)
+    def _residual(self, operator_tt, solution, rhs_tt):
+        """Relative residual, computed in TT arithmetic rather than borrowed."""
+        rhs_vector = rhs_tt.get_full_tensor().reshape(-1)
+        residual = (
+            (operator_tt.dot(solution, truncate=True) - rhs_tt)
+            .get_full_tensor()
+            .reshape(-1)
         )
-        toeplitz_tt = tensor_train.tt_svd(
-            toeplitz_mat.reshape([2] * 2 * order),
-            physical_indexes=[(2, 2)] * order,
+        return np.linalg.norm(residual) / np.linalg.norm(rhs_vector)
+
+    def _toeplitz(self):
+        """Symmetric Toeplitz A[i, j] = 1 + |i - j|, condition number ~4.6e4."""
+        size = 2**self.ORDER
+        matrix = sp.linalg.toeplitz(np.arange(1, size + 1), np.arange(1, size + 1))
+        train = tensor_train.tt_svd(
+            matrix.reshape([2] * 2 * self.ORDER),
+            physical_indexes=[(2, 2)] * self.ORDER,
             ttm=True,
             error=0,
         )
+        return matrix, train
 
-        rhs_mat = np.ones(toeplitz_mat.shape[0])
+    def test_mals_solves_a_toeplitz_system_from_either_guess(self):
+        """Solve a Toeplitz system from different initial guesses."""
+        toeplitz_mat, toeplitz_tt = self._toeplitz()
         rhs_tt = tensor_train.ones(toeplitz_tt.row_modes)
+        reference = np.linalg.solve(toeplitz_mat, np.ones(toeplitz_mat.shape[0]))
 
-        # not random (all ones) guess for MALS algorithm
-        initial_tt = tensor_train.ones(toeplitz_tt.row_modes, ranks=5).compress_svd(
-            canonical="right"
-        )
+        guesses = {
+            "ones": tensor_train.ones(toeplitz_tt.row_modes, ranks=5).orthonormalize(
+                canonical="right"
+            ),
+            "random": tensor_train.rand(toeplitz_tt.row_modes, ranks=5, seed=153),
+        }
+        for name, guess in guesses.items():
+            with self.subTest(guess=name):
+                solution = mals(
+                    toeplitz_tt,
+                    rhs_tt,
+                    x0=guess,
+                    error_threshold=TEST_DELTA,
+                    max_rank=10,
+                    max_sweeps=1,
+                )
 
-        solution_mat = np.linalg.solve(toeplitz_mat, rhs_mat)
-        solution_tt_solve = mals(
-            toeplitz_tt,
-            rhs_tt,
-            x0=initial_tt,
-            error_threshold=TEST_DELTA,
-            max_rank=10,
-            max_sweeps=1,
-        )
+                self.assertLess(self._solution_error(solution, reference), TEST_DELTA)
+                self.assertLess(
+                    self._residual(toeplitz_tt, solution, rhs_tt), TEST_DELTA
+                )
 
-        rel_err_mat_solve = np.linalg.norm(
-            solution_mat - solution_tt_solve.get_full_tensor().reshape(-1)
-        ) / np.linalg.norm(solution_mat)
-        rel_err_tt_solve = np.linalg.norm(
-            (toeplitz_tt.dot(solution_tt_solve, truncate=True) - rhs_tt)
-            .get_full_tensor()
-            .reshape(-1)
-        ) / np.linalg.norm(rhs_tt.get_full_tensor().reshape(-1))
-
-        self.assertLess(rel_err_mat_solve, TEST_DELTA)
-        self.assertLess(rel_err_tt_solve, TEST_DELTA)
-
-        # random guess for MALS algorithm
-        initial_tt_random = tensor_train.rand(toeplitz_tt.row_modes, ranks=5, seed=153)
-        solution_tt_solve_random = mals(
-            toeplitz_tt,
-            rhs_tt,
-            x0=initial_tt_random,
-            error_threshold=TEST_DELTA,
-            max_rank=10,
-            max_sweeps=1,
-        )
-
-        rel_err_mat_solve_random = np.linalg.norm(
-            solution_mat - solution_tt_solve_random.get_full_tensor().reshape(-1)
-        ) / np.linalg.norm(solution_mat)
-        rel_err_tt_solve_random = np.linalg.norm(
-            (toeplitz_tt.dot(solution_tt_solve_random, truncate=True) - rhs_tt)
-            .get_full_tensor()
-            .reshape(-1)
-        ) / np.linalg.norm(rhs_tt.get_full_tensor().reshape(-1))
-
-        self.assertLess(rel_err_mat_solve_random, TEST_DELTA)
-        self.assertLess(rel_err_tt_solve_random, TEST_DELTA)
-
-        # ------------- RANDOM MATRIX -------------#
-        operator_mat_not_pos = np.random.default_rng(31).random(
-            (toeplitz_mat.shape[0], toeplitz_mat.shape[1])
-        )
-        operator_tt_not_pos = tensor_train.tt_svd(
-            operator_mat_not_pos.reshape([2] * 2 * order),
-            physical_indexes=[(2, 2)] * order,
+    def test_mals_solves_a_nonsymmetric_system_from_the_default_guess(self):
+        """A dense random operator, condition number 1.4e4, solved without ``x0``."""
+        size = 2**self.ORDER
+        operator_mat = np.random.default_rng(31).random((size, size))
+        operator_tt = tensor_train.tt_svd(
+            operator_mat.reshape([2] * 2 * self.ORDER),
+            physical_indexes=[(2, 2)] * self.ORDER,
             ttm=True,
             error=0,
         )
 
-        solution_mat_not_pos = np.linalg.solve(operator_mat_not_pos, rhs_mat)
-        rhs_mat = operator_mat_not_pos @ solution_mat_not_pos
-        rhs_tt = tensor_train.tt_svd(rhs_mat.reshape([2] * order), error=0)
-
-        solution_tt_not_pos = mals(
-            operator_tt_not_pos, rhs_tt, error_threshold=TEST_DELTA, max_sweeps=2
+        # rhs is A @ x for a known x, so the exact solution needs no inversion
+        reference = np.linalg.solve(operator_mat, np.ones(size))
+        rhs_tt = tensor_train.tt_svd(
+            (operator_mat @ reference).reshape([2] * self.ORDER), error=0
         )
 
-        rel_err_mat_solve_not_pos = np.linalg.norm(
-            solution_mat_not_pos - solution_tt_not_pos.get_full_tensor().reshape(-1)
-        ) / np.linalg.norm(solution_mat_not_pos)
-        rel_err_tt_solve_not_pos = np.linalg.norm(
-            (operator_tt_not_pos.dot(solution_tt_not_pos, truncate=True) - rhs_tt)
-            .get_full_tensor()
-            .reshape(-1)
-        ) / np.linalg.norm(rhs_tt.get_full_tensor().reshape(-1))
+        solution = mals(operator_tt, rhs_tt, error_threshold=TEST_DELTA, max_sweeps=2)
 
-        self.assertLess(rel_err_mat_solve_not_pos, TEST_DELTA)
-        self.assertLess(rel_err_tt_solve_not_pos, TEST_DELTA)
+        self.assertLess(self._solution_error(solution, reference), TEST_DELTA)
+        self.assertLess(self._residual(operator_tt, solution, rhs_tt), TEST_DELTA)
 
-        # ------------- HILBERT MATRIX -------------#
-        hilbert_mat = sp.linalg.hilbert(2**order)
-        hilbert_tt = tensor_train.tt_svd(
-            hilbert_mat.reshape([4] * 2 * (order // 2)),
-            physical_indexes=[(4, 4)] * (order // 2),
-            ttm=True,
-            error=0,
-        )
-
-        rhs_tt = tensor_train.ones(hilbert_tt.row_modes, ranks=10)
-        initial_tt = tensor_train.ones(hilbert_tt.row_modes, ranks=10).compress_svd(
-            canonical="right"
-        )
-
-        solution_tt_hilbert = mals(
-            hilbert_tt, rhs_tt, x0=initial_tt, error_threshold=TEST_DELTA, max_sweeps=2
-        )
-
-        rel_err_tt_solve_hilbert = np.linalg.norm(
-            (hilbert_tt.dot(solution_tt_hilbert, truncate=True) - rhs_tt)
-            .get_full_tensor()
-            .reshape(-1)
-        ) / np.linalg.norm(rhs_tt.get_full_tensor().reshape(-1))
-
-        self.assertLess(rel_err_tt_solve_hilbert, TEST_DELTA * 100)
-
-        # --------------DIAGONAL MATRIX -------------#
-        diagonal_mat = np.diag(np.arange(1, 2**order + 1))
+    def test_mals_solves_a_diagonal_system(self):
+        """A well-conditioned operator where truncation is the limit."""
+        size = 2**self.ORDER
+        diagonal_mat = np.diag(np.arange(1, size + 1))
         diagonal_tt = tensor_train.tt_svd(
-            diagonal_mat.reshape([2] * 2 * order),
-            physical_indexes=[(2, 2)] * order,
+            diagonal_mat.reshape([2] * 2 * self.ORDER),
+            physical_indexes=[(2, 2)] * self.ORDER,
             ttm=True,
             error=0,
         )
 
         rhs_tt = tensor_train.ones(diagonal_tt.row_modes, ranks=10)
-        initial_tt = tensor_train.ones(diagonal_tt.row_modes, ranks=10).compress_svd(
+        guess = tensor_train.ones(diagonal_tt.row_modes, ranks=10).orthonormalize(
             canonical="right"
         )
 
-        solution_tt_diagonal = mals(
+        solution = mals(
             diagonal_tt,
             rhs_tt,
-            x0=initial_tt,
+            x0=guess,
+            # the decimation produces the residual asserted below; at
+            # TEST_DELTA the run lands at 9.7e-07, above that limit
             error_threshold=TEST_DELTA / 10,
             max_sweeps=1,
         )
 
-        rel_err_tt_solve_diagonal = np.linalg.norm(
-            (diagonal_tt.dot(solution_tt_diagonal, truncate=True) - rhs_tt)
-            .get_full_tensor()
-            .reshape(-1)
-        ) / np.linalg.norm(rhs_tt.get_full_tensor().reshape(-1))
+        self.assertLess(self._residual(diagonal_tt, solution, rhs_tt), TEST_DELTA)
 
-        self.assertLess(rel_err_tt_solve_diagonal, TEST_DELTA)
+    def test_mals_on_a_system_past_double_precision(self):
+        """Hilbert 256: condition number 6.4e20, numerical rank 20.
+
+        The operator is singular to working precision, so the solution vector
+        is not determined by the data. The assertions cover what holds
+        regardless: the residual is small and the solution is not accurate.
+        """
+        size = 2**self.ORDER
+        hilbert_mat = sp.linalg.hilbert(size)
+        # folded to modes of 4 so the exact TTM has half as many cores
+        hilbert_tt = tensor_train.tt_svd(
+            hilbert_mat.reshape([4] * 2 * (self.ORDER // 2)),
+            physical_indexes=[(4, 4)] * (self.ORDER // 2),
+            ttm=True,
+            error=0,
+        )
+
+        rhs_tt = tensor_train.ones(hilbert_tt.row_modes, ranks=10)
+        guess = tensor_train.ones(hilbert_tt.row_modes, ranks=10).orthonormalize(
+            canonical="right"
+        )
+
+        solution = mals(
+            hilbert_tt, rhs_tt, x0=guess, error_threshold=TEST_DELTA, max_sweeps=2
+        )
+        vector = solution.get_full_tensor().reshape(-1)
+
+        # a near-singular local solve can return non-finite entries; it does not
+        self.assertTrue(np.all(np.isfinite(vector)))
+
+        self.assertEqual(solution.bonds[0], 1)
+        self.assertEqual(solution.bonds[-1], 1)
+        for index, core in enumerate(solution.cores):
+            with self.subTest(core=index):
+                self.assertEqual(core.shape[0], solution.bonds[index])
+                self.assertEqual(core.shape[3], solution.bonds[index + 1])
+
+        self.assertLess(self._residual(hilbert_tt, solution, rhs_tt), TEST_DELTA * 100)
+
+        # a small residual at this conditioning does not imply an accurate solution
+        reference = np.linalg.solve(hilbert_mat, rhs_tt.get_full_tensor().reshape(-1))
+        self.assertGreater(self._solution_error(solution, reference), 0.5)
 
     def test_mals_residual_tracking_and_stopping(self):
         """MALS must track per-sweep residuals and stop on tolerance or stagnation."""
@@ -189,7 +182,7 @@ class TestMals(unittest.TestCase):
             error=0,
         )
         rhs_tt = tensor_train.ones(toeplitz_tt.row_modes)
-        initial_tt = tensor_train.ones(toeplitz_tt.row_modes, ranks=5).compress_svd(
+        initial_tt = tensor_train.ones(toeplitz_tt.row_modes, ranks=5).orthonormalize(
             canonical="right"
         )
 

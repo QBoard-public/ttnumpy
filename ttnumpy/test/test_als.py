@@ -27,7 +27,9 @@ class TestAls(unittest.TestCase):
         exact = np.linalg.solve(laplacian, np.ones(size))
 
         # the solution is a parabola of exact QTT rank 3
-        guess = tensor_train.ones([2] * order, ranks=3).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=3).orthonormalize(
+            canonical="right"
+        )
         solution, info = als(
             laplacian_tt,
             rhs_tt,
@@ -58,7 +60,9 @@ class TestAls(unittest.TestCase):
         order = 6
         laplacian_tt, rhs_tt, _ = qtt_laplacian_1d(order)
 
-        guess = tensor_train.ones([2] * order, ranks=1).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=1).orthonormalize(
+            canonical="right"
+        )
         solution, info = als(
             laplacian_tt,
             rhs_tt,
@@ -80,7 +84,9 @@ class TestAls(unittest.TestCase):
 
         order = 6
         laplacian_tt, rhs_tt, _ = qtt_laplacian_1d(order)
-        guess = tensor_train.ones([2] * order, ranks=6).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=6).orthonormalize(
+            canonical="right"
+        )
 
         direct = als(
             laplacian_tt,
@@ -114,7 +120,9 @@ class TestAls(unittest.TestCase):
 
         order = 5
         laplacian_tt, rhs_tt, _ = qtt_laplacian_1d(order)
-        guess = tensor_train.ones([2] * order, ranks=4).compress_svd(canonical="right")
+        guess = tensor_train.ones([2] * order, ranks=4).orthonormalize(
+            canonical="right"
+        )
 
         solution = als(laplacian_tt, rhs_tt, x0=guess, max_sweeps=3, symmetric=True)
 
