@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The Poisson benchmark problem: QTT Laplacian, assembly and TT solve.
 
 Builds -Delta u = rhs on a square with homogeneous Dirichlet boundaries in

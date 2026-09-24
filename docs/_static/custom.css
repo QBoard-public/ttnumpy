@@ -1,0 +1,6 @@
+/* Furo centres the sidebar logo while the project name below it is flush
+   left, so the two do not line up. */
+.sidebar-logo {
+  max-width: 60%;
+  margin-left: 0;
+}

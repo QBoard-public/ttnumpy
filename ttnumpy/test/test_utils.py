@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Tests for the tensor-train utility functions.
 
 Every train here is seeded: these helpers are compared against exact

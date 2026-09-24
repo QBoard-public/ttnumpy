@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Pytest configuration shared by every test package.
 
 Holds the test-side logging setup. Test code logs through the ``ttnumpy-test``

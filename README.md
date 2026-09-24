@@ -1,4 +1,6 @@
-# TTNumPy
+<h1 align="center">
+  <img src="branding/logo/ttnumpy-logo.svg" alt="TTNumPy — tensor train toolbox by QBoard" width="440">
+</h1>
 
 **Tensor-train toolbox for numerical linear algebra.**
 
@@ -254,6 +256,15 @@ not call `setup_logging`; use `pytest --log-cli-level=DEBUG` instead.
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
 development setup, coding conventions and pull request workflow.
+
+## Maintainers
+
+TTNumPy is developed at Cloud Quantum Technologies and maintained by:
+
+- **Oleg Tatarkin** ([@mvanza](https://gitverse.ru/mvanza)) — research and
+  development, maintainer
+- **Sergey Usmanov** ([@susmanov](https://gitverse.ru/susmanov)) — scientific
+  lead: technical direction and code review
 
 ## License
 

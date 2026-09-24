@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Benchmarks comparing the tensor-train solvers against dense baselines."""
 
 from .poisson import (

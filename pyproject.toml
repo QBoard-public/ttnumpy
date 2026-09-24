@@ -19,6 +19,10 @@ classifiers = [
 authors = [
   { name = "Cloud Quantum Technologies Limited Liability Company", email = "info@qboard.tech" },
 ]
+maintainers = [
+  { name = "Oleg Tatarkin" },
+  { name = "Sergey Usmanov" },
+]
 dependencies = [
   "numpy>=2.1.0",
   "scipy>=1.15.0",

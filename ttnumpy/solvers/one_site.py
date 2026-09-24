@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """One-site local algebra shared by the ALS and AMEn sweeps.
 
 The local right-hand side and operator (explicit or matrix-free) of a

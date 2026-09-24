@@ -1,3 +1,6 @@
+# Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from __future__ import annotations
 
 import sys
@@ -90,6 +93,10 @@ master_doc = "index"
 
 html_theme = "furo"
 html_static_path = ["_static"]
+html_logo = "../branding/logo/ttnumpy-mark.svg"
+html_favicon = "../branding/logo/ttnumpy-mark.svg"
+html_css_files = ["custom.css"]
+latex_logo = "../branding/logo/ttnumpy-logo-print.png"
 
 latex_elements = {
     "extraclassoptions": "openany",
