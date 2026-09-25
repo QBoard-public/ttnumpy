@@ -13,6 +13,8 @@ known in the physics literature as matrix product states and matrix product
 operators. It is written in Python on top of NumPy and SciPy and pulls in no
 other runtime dependencies.
 
+Documentation: <https://qboard.gitverse.site/ttnumpy/>
+
 ## Features
 
 - **Tensor train container.** `TensorTrain` holds both the TT and the TTM
@@ -102,9 +104,12 @@ error of what they discard.
 
 ## Documentation
 
-The `docs/` directory holds the Sphinx sources: a user guide that builds up
-tensor networks, the tensor train format and the variational solvers from the
+The documentation is published at
+**<https://qboard.gitverse.site/ttnumpy/>**: a user guide that builds up tensor
+networks, the tensor train format and the variational solvers from the
 beginning, plus a full API reference.
+
+The Sphinx sources live in `docs/`, so the same pages can be built locally:
 
 ```bash
 python -m pip install -e '.[docs]'

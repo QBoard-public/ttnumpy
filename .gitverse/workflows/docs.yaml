@@ -55,7 +55,7 @@ jobs:
           retention-days: 7
 
       - name: Upload pages artifact
-        uses: gitverse/upload-pages-artifact@v1.0.0
+        uses: actions/upload-pages-artifact@v1.0.0
         with:
           path: docs/_build/html
 
@@ -66,7 +66,8 @@ jobs:
     needs: build
     runs-on: docker
     container:
-      image: python:3.10-bookworm
+      # deploy-pages declares `using: go`
+      image: golang:1.25-bookworm
     steps:
       - name: Install Node.js required by actions
         run: |
@@ -76,4 +77,4 @@ jobs:
           apt-get install -y --no-install-recommends nodejs
 
       - name: Deploy to GitVerse Pages
-        uses: gitverse/deploy-pages@v1.0.0
+        uses: actions/deploy-pages@v1.0.0
