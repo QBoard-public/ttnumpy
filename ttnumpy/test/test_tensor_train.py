@@ -1288,6 +1288,14 @@ class TestTTInspection(unittest.TestCase):
                 with self.assertRaises(tensor_train.DimensionMismatch):
                     tt_rand.get_element(index)
 
+    def test_get_element_accepts_numpy_integer_indices(self):
+        """NumPy integers reach this method from array-valued index lists."""
+        tt_rand = tensor_train.rand(physical_indexes=[2, 3, 4], ranks=3, seed=15)
+        expected = tt_rand.get_element([1, 2, 3])
+        for index in (np.array([1, 2, 3]), list(np.array([1, 2, 3]))):
+            with self.subTest(container=type(index).__name__):
+                self.assertEqual(tt_rand.get_element(index), expected)
+
     def test_conj_inplace_writes_into_the_receiver(self):
         """``inplace=True`` must conjugate this train, not return a new one."""
         # two rank-3 cores of shape (1, 2, 1), so the train is a 2x2 vector

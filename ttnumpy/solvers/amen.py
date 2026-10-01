@@ -9,6 +9,40 @@ solved core, so the bond dimensions adapt instead of staying fixed. The z
 machinery and the truncate-then-enrich rank control live here alongside the
 solver.
 
+Cost, for ``n`` sites of mode size ``d``, solution bond dimension ``r``
+(enrichment included), operator bond dimension ``R``, right-hand-side bond
+dimension ``r_b`` and residual bond dimension ``k`` (``kickrank``). A sweep
+visits every site twice, and the local system at a site has ``N = r^2 d``
+unknowns.
+
+- Local solve, as in ALS: on the explicit matrix, used up to
+  ``direct_solve_size`` unknowns, ``O(r^4 d^2 R + r^2 d^2 R^2)`` to build it,
+  ``O(N^3)`` to factorize it and ``O(N^2)`` memory; matrix-free,
+  ``O(r^3 d R + r^2 d^2 R^2)`` per Krylov iteration.
+- Residual core and enrichment block: ``O(k (r^2 d R + r d^2 R^2 + k r d R))``.
+- Truncation of the solved core: an SVD in ``O(r^3 d)``. With
+  ``residual_tol`` set, choosing the rank applies the local operator to up to
+  ``r`` rank-one terms.
+- Environment updates after each step: ``O(r^3 d R + r^2 d^2 R^2)`` for the
+  operator, ``O(r r_b d (r + r_b))`` for the right-hand side and
+  ``O(k (r^2 d R + r d^2 R^2 + k r d R + r_b d (k + r_b)))`` for the
+  residual. The environments of all sites hold
+  ``O(n (r^2 R + r r_b + k r R + k r_b))`` numbers.
+- Residual after a sweep, when residuals are tracked:
+  ``O(n d (d r^2 R^2 + (r R + r_b)^3))`` to form and orthonormalize the train
+  ``A x - b``.
+
+Overall, a sweep takes ``O(n (r^6 d^3 + r^4 d^2 R + r^2 d^2 R^2))`` with
+explicit local matrices, or ``O(n m (r^3 d R + r^2 d^2 R^2))`` with ``m``
+applications of the local operator per step (the Krylov iterations, plus up
+to ``r`` for residual-based truncation), plus
+``O(n k (r^2 d R + r d^2 R^2 + k r d R))`` for the residual train,
+``O(n (r + k) r_b d (r + k + r_b))`` for the right-hand side and, when
+residuals are tracked, ``O(n d (d r^2 R^2 + (r R + r_b)^3))``. Memory is
+``O(n (d r^2 + d k^2 + d^2 R^2 + d r_b^2 + r^2 R + r r_b + k r R + k r_b))``
+for the trains and environments, plus ``O(r^4 d^2)`` for an explicit local
+matrix and ``O(n d (r R + r_b)^2)`` for the train ``A x - b``.
+
 Reference:
 - Dolgov & Savostyanov, SIAM J. Sci. Comput. 36(5), 2014,
   https://doi.org/10.1137/140953289.

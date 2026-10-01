@@ -435,7 +435,9 @@ class TensorTrain:
                 f"Number of indexes not equal to number of tensor train cores: {len(element_index)} != {self.n_cores}"
             )
 
-        if self.tt_type == TensorTrainType.TT and isinstance(element_index[0], int):
+        if self.tt_type == TensorTrainType.TT and isinstance(
+            element_index[0], (int, np.integer)
+        ):
             element_index = list(zip(element_index, [0] * self.n_cores))
         contraction = np.tensordot(
             self.cores[0][:, element_index[0][0], element_index[0][1], :],
@@ -691,6 +693,8 @@ class TensorTrain:
 
     def truncate(
         self,
+        # TODO: default 1e-15 here, 0.0 in tt_svd and compress_svd, where 0.0
+        # already drops only rounding noise through utils.truncated_bond QBRD-5867
         error: float = 1e-15,
         max_rank: Optional[int] = None,
         canonical: Literal["auto", "left", "right"] = "auto",
@@ -749,6 +753,7 @@ class TensorTrain:
     def tt_to_qtt(
         self,
         mode_size: int = 2,
+        # TODO: default 1e-12 here and in qtt_to_tt, 0.0 in tt_svd QBRD-5867
         error: float = 1e-12,
         max_rank: Optional[int] = None,
     ) -> "TensorTrain":

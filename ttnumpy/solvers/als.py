@@ -3,6 +3,31 @@
 
 """Alternating Least Squares (ALS) linear solver on tensor trains.
 
+Cost, for ``n`` sites of mode size ``d``, solution bond dimension ``r`` (fixed
+by ``x0``), operator bond dimension ``R`` and right-hand-side bond dimension
+``r_b``. A sweep visits every site twice, and the local system at a site has
+``N = r^2 d`` unknowns.
+
+- Local solve on the explicit matrix, used up to ``direct_solve_size``
+  unknowns: ``O(r^4 d^2 R + r^2 d^2 R^2)`` to build the matrix, ``O(N^3)`` to
+  factorize it, ``O(N^2)`` memory.
+- Matrix-free local solve: ``O(r^3 d R + r^2 d^2 R^2)`` per Krylov iteration.
+- Environment update after each step: ``O(r^3 d R + r^2 d^2 R^2)`` for the
+  operator and ``O(r r_b d (r + r_b))`` for the right-hand side. The
+  environments of all sites hold ``O(n (r^2 R + r r_b))`` numbers.
+- Residual after a sweep, when residuals are tracked:
+  ``O(n d (d r^2 R^2 + (r R + r_b)^3))`` to form and orthonormalize the train
+  ``A x - b``.
+
+Overall, a sweep takes ``O(n (r^6 d^3 + r^4 d^2 R + r^2 d^2 R^2))`` with
+explicit local matrices, or ``O(n m (r^3 d R + r^2 d^2 R^2))`` with ``m``
+Krylov iterations per local solve, plus ``O(n r r_b d (r + r_b))`` for the
+right-hand side and, when residuals are tracked,
+``O(n d (d r^2 R^2 + (r R + r_b)^3))``. Memory is
+``O(n (d r^2 + d^2 R^2 + d r_b^2 + r^2 R + r r_b))`` for the trains and
+environments, plus ``O(r^4 d^2)`` for an explicit local matrix and
+``O(n d (r R + r_b)^2)`` for the train ``A x - b``.
+
 Reference:
 - Dolgov & Savostyanov, SIAM J. Sci. Comput. 36(5), 2014,
   https://doi.org/10.1137/140953289.

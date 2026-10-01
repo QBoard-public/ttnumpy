@@ -251,6 +251,8 @@ class _SolverSettings:
     """
 
     max_sweeps: int
+    # TODO: residual_tol, truncation_tol and local_rtol are all relative
+    # residual targets, spelled ``_tol`` in two and ``_rtol`` in one QBRD-5867
     residual_tol: Optional[float]
     #: Resolved stagnation factor: a float in (0, 1], or None if disabled.
     stagnation_factor: Optional[float]
@@ -864,6 +866,9 @@ def _truncation_rank_by_residual(
     return limit, max_rank is not None and max_rank < len(S)
 
 
+# TODO: ``error_threshold`` compares each singular value with sigma_1 of its
+# own core, a different criterion from the Frobenius ``error`` of
+# tensor_train.truncate under a different name QBRD-5867
 def _svd_truncation_rank(
     S: np.ndarray, error_threshold: float, max_rank: Optional[int]
 ) -> Tuple[int, bool]:
