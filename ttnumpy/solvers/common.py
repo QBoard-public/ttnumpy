@@ -137,7 +137,7 @@ def relative_residual(
     Returns:
         float: ||A @ x - b|| / ||b||, or ||A @ x - b|| if ||b|| == 0.
     """
-    residual = A.dot(x).add(b.multiply(-1), truncate=False)
+    residual = A.dot(x).add(b.multiply(-1))
     if b_norm is None:
         b_norm = b.tt_norm()
     residual_norm = residual.tt_norm()

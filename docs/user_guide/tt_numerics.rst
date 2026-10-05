@@ -230,7 +230,7 @@ The library exposes this three ways:
 =============================  ==============================================
 Method                         Use
 =============================  ==============================================
-``truncate(error, max_rank)``  General rounding; ``error`` defaults to 1e-15
+``truncate(error, max_rank)``  General rounding; ``error`` defaults to 0.0
 ``compress_svd(error, ...)``   SVD sweep assuming a canonical form is present
 ``orthonormalize(canonical)``  Canonical form only, no truncation
 =============================  ==============================================
@@ -238,6 +238,24 @@ Method                         Use
 Both ``truncate`` and ``compress_svd`` accept ``max_rank`` to cap bonds
 regardless of accuracy, ``canonical`` to choose the sweep direction, and
 ``inplace``.
+
+``error`` bounds the relative Frobenius error of the result. 
+``error=0.0`` sets no target: only singular values at the rounding level of
+one SVD, :math:`\min(m, n)\,\varepsilon_{\mathrm{mach}}\,\sigma_1` for an
+:math:`m \times n` unfolding, are discarded. In a chain of SVDs over many small
+modes, as in ``tt_svd`` of quantized data, the rounding of earlier splits can
+exceed that level and stay in the train as extra rank. Positive ``error``
+such as the default ``1e-12`` discards it.
+
+The cutoff follows the precision of the data: :math:`\varepsilon_{\mathrm{mach}}`
+is the machine epsilon of its dtype, near :math:`10^{-7}` for ``float32`` and
+``complex64``. ``error=0.0`` therefore drops single-precision rounding noise as
+it drops double-precision noise. The default ``error=1e-12`` lies below single
+precision and acts as ``0.0`` there, so in a long chain of splits a few extra
+ranks can remain. An ``error`` above the precision of the data discards them,
+and the margin it needs grows with the chain: for ``sin(10x)`` sampled in
+``float32`` the ranks are exact at ``1e-5`` on :math:`2^{16}` points and at
+``1e-4`` on :math:`2^{24}`.
 
 Any tensor can be truncated
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -256,7 +274,7 @@ changes — so all that growth is redundant, and rounding removes it exactly:
 
    x = tt.rand([4] * 5, ranks=2, seed=7)
 
-   inflated = x.add(x, truncate=False).add(x, truncate=False)
+   inflated = x + x + x
    print(inflated.bonds)            # [1, 6, 6, 6, 6, 1]
 
    rounded = inflated.truncate(error=1e-12)
@@ -373,13 +391,15 @@ only copying — so forming the sum is essentially free. The price is that
    x = tt.rand([4, 4, 4, 4], ranks=3, seed=1)
    y = tt.rand([4, 4, 4, 4], ranks=2, seed=2)
 
-   print(x.add(y, truncate=False).bonds)   # [1, 5, 5, 5, 1] = 3 + 2
-   print((x + y).bonds)                    # rounded by default
+   print((x + y).bonds)                # [1, 5, 5, 5, 1] = 3 + 2
+   print((x + y).truncate().bonds)     # [1, 4, 5, 4, 1]
 
 Because ranks add, a sum of :math:`m` trains has rank :math:`m r` before
-rounding — which is why ``add`` rounds by default (``truncate=True``) and
-why summing a long series should round as it goes rather than at the end.
-Subtraction is addition with a scaled operand and behaves identically.
+rounding. Rounding the finished sum once costs :math:`O(d\,n\,(m r)^3)`;
+rounding after every term keeps the rank at its rounded value and costs
+:math:`m` smaller roundings, which pays off when :math:`m r` is large
+compared with the rounded rank. Subtraction is addition with a scaled
+operand and behaves identically.
 
 Element-wise product
 ~~~~~~~~~~~~~~~~~~~~
@@ -396,13 +416,11 @@ so **bonds multiply**.
 
 .. code-block:: python
 
-   print(x.multiply(y).bonds)   # [1, 6, 6, 6, 1] = 3 * 2
-   print((x * y).bonds)
+   print((x * y).bonds)                # [1, 6, 6, 6, 1] = 3 * 2
+   print((x * y).truncate().bonds)     # [1, 4, 6, 4, 1]
 
 ``multiply`` accepts a scalar or a train, dispatching to scaling or to the
-Hadamard product. Note the asymmetry with ``add``: it does **not** round by
-default (``truncate=False``), so the rank product is what you get. Round
-explicitly, or pass ``truncate=True``.
+Hadamard product.
 
 Matrix products
 ~~~~~~~~~~~~~~~
@@ -426,26 +444,31 @@ this the most expensive of the elementwise-structured operations at
    A = tt.rand([(4, 4)] * 4, ranks=3, seed=3)   # TTM
    x = tt.rand([4, 4, 4, 4], ranks=3, seed=1)   # TT
 
-   print(A.dot(x).bonds)   # [1, 9, 9, 9, 1] = 3 * 3
-   print((A @ x).bonds)
-
-Like ``multiply``, ``dot`` leaves ``truncate=False`` by default.
+   print((A @ x).bonds)                # [1, 9, 9, 9, 1] = 3 * 3
+   print((A @ x).truncate().bonds)     # [1, 4, 9, 4, 1]
 
 Operators and methods
 ~~~~~~~~~~~~~~~~~~~~~
 
-The operators are shorthand for the methods, and the methods take the
-rounding flag:
+The operators are shorthand for the methods. No arithmetic operation rounds
+by default: the result holds the exact sum or product, with the ranks below.
+``truncate()`` on the result compresses it, and ``truncate=True`` on a
+method does the same in one call.
 
 ==============  ==========================  =============================
-Operator        Method                      Rounds by default
+Operator        Method                      Ranks of the result
 ==============  ==========================  =============================
-``x + y``       ``x.add(y)``                yes
-``x - y``       ``x.add(-y)``               yes
-``a * x``       ``x.multiply(a)``           n/a (rank unchanged)
-``x * y``       ``x.multiply(y)``           no
-``A @ x``       ``A.dot(x)``                no
+``x + y``       ``x.add(y)``                :math:`r_x + r_y`
+``x - y``       ``x.add(-y)``               :math:`r_x + r_y`
+``a * x``       ``x.multiply(a)``           :math:`r_x`
+``x * y``       ``x.multiply(y)``           :math:`r_x r_y`
+``A @ x``       ``A.dot(x)``                :math:`r_A r_x`
 ==============  ==========================  =============================
+
+When the operands nearly cancel, as in ``x - y`` with ``x`` close to ``y``,
+their rounding error is large compared with the result, and ``truncate()``
+keeps it as rank: ``(x - x).truncate()`` is zero up to rounding but keeps
+ranks of :math:`2 r_x` wherever the mode sizes allow.
 
 Norms and inner products return plain numbers: ``tt_norm()`` gives the
 Frobenius norm, computed in TT arithmetic without expanding anything. And this is really matter.
@@ -460,8 +483,8 @@ sweep by every solver in :doc:`linear_systems`. With
   :math:`10^3` above the rank-10 operands.
 
 Iterate without rounding and the ranks compound: ten unrounded matrix
-products take rank 10 to :math:`10^{11}`. Round after each, and they stay
-wherever the accuracy target puts them. This is the single most important
+products take rank 10 to :math:`10^{11}`. Round after each with
+``truncate(error=...)``, and they stay wherever the accuracy target puts them. This is the single most important
 habit in the format, and it is why the solvers spend as much effort on
 truncation strategy as on the local solves — see the treatment of
 residual-based truncation in :doc:`linear_systems`.

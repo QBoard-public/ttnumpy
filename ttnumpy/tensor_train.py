@@ -169,7 +169,7 @@ class TensorTrain:
         """Get number of cores."""
         return self.n_cores
 
-    def add(self, other: "TensorTrain", truncate: bool = True) -> "TensorTrain":
+    def add(self, other: "TensorTrain", truncate: bool = False) -> "TensorTrain":
         """Sum of two tensor trains.
 
         Resulting tensor train will have bond dimensions equal to sum of
@@ -177,7 +177,7 @@ class TensorTrain:
 
         Args:
             other: Tensor train to be added;
-            truncate: If True, truncate resulting tensor train after addition (default=True).
+            truncate: If True, truncate resulting tensor train after addition (default=False).
 
         Raises:
             TypeError: If other is not TensorTrain type;
@@ -200,7 +200,10 @@ class TensorTrain:
 
         for i in range(self.n_cores):
             cores.append(
-                np.zeros([ranks[i], self.row_modes[i], self.col_modes[i], ranks[i + 1]])
+                np.zeros(
+                    [ranks[i], self.row_modes[i], self.col_modes[i], ranks[i + 1]],
+                    dtype=np.result_type(self.cores[i], other.cores[i]),
+                )
             )
 
             # append lhs core
@@ -308,13 +311,13 @@ class TensorTrain:
 
         There is no implicit transposition: column modes of the left operand
         must match row modes of the right operand. The inner product is
-        returned as a TT with all physical dimensions equal to 1; use
+        returned as a TT with all physical dimensions equal to 1; uses
         get_full_tensor() to extract the scalar. Note that complex operands
         are not conjugated (matmul semantics).
 
         Args:
             other: Tensor train to be multiplied;
-            truncate: If True, truncate resulting tensor train after multiplication (default=True).
+            truncate: If True, truncate resulting tensor train after multiplication (default=False).
 
         Raises:
             TypeError: If other is not TensorTrain type;
@@ -693,9 +696,7 @@ class TensorTrain:
 
     def truncate(
         self,
-        # TODO: default 1e-15 here, 0.0 in tt_svd and compress_svd, where 0.0
-        # already drops only rounding noise through utils.truncated_bond QBRD-5867
-        error: float = 1e-15,
+        error: float = 0.0,
         max_rank: Optional[int] = None,
         canonical: Literal["auto", "left", "right"] = "auto",
         inplace: bool = False,
@@ -753,7 +754,6 @@ class TensorTrain:
     def tt_to_qtt(
         self,
         mode_size: int = 2,
-        # TODO: default 1e-12 here and in qtt_to_tt, 0.0 in tt_svd QBRD-5867
         error: float = 1e-12,
         max_rank: Optional[int] = None,
     ) -> "TensorTrain":
@@ -827,13 +827,13 @@ class TensorTrain:
                     col_mode_size**j,
                     right_bond,
                 ).transpose(0, 1, 3, 2, 4, 5)
-                U, S, V = svd(
-                    core.reshape(
-                        left_bond * row_mode_size * col_mode_size,
-                        row_mode_size**j * col_mode_size**j * right_bond,
-                    ),
+                matrix = core.reshape(
+                    left_bond * row_mode_size * col_mode_size,
+                    row_mode_size**j * col_mode_size**j * right_bond,
+                )
+                U, S, _ = svd(
+                    matrix,
                     full_matrices=False,
-                    overwrite_a=True,
                     check_finite=False,
                     lapack_driver="gesvd",
                 )
@@ -846,16 +846,18 @@ class TensorTrain:
                         left_bond, row_mode_size, col_mode_size, new_bond
                     )
                 )
-                core = np.dot(np.diag(S[:new_bond]), V[:new_bond, :])
+                core = U[:, :new_bond].conj().T @ matrix
                 left_bond = new_bond
 
             if i < self.n_cores - 1:
                 # push the group remainder into the next core: the emitted core
                 # becomes left-orthogonal and the boundary bond is truncated too
-                U, S, V = svd(
-                    core.reshape(left_bond * row_mode_size * col_mode_size, right_bond),
+                matrix = core.reshape(
+                    left_bond * row_mode_size * col_mode_size, right_bond
+                )
+                U, S, _ = svd(
+                    matrix,
                     full_matrices=False,
-                    overwrite_a=True,
                     check_finite=False,
                     lapack_driver="gesvd",
                 )
@@ -866,7 +868,7 @@ class TensorTrain:
                     )
                 )
                 tt.cores[i + 1] = np.tensordot(
-                    np.dot(np.diag(S[:new_bond]), V[:new_bond, :]),
+                    U[:, :new_bond].conj().T @ matrix,
                     tt.cores[i + 1],
                     axes=(1, 0),
                 )
@@ -975,7 +977,7 @@ class TensorTrain:
 
 def tt_svd(
     tensor: np.ndarray,
-    error: float = 0.0,
+    error: float = 1e-12,
     max_rank: Optional[int] = None,
     physical_indexes: Optional[Union[List[int], List[Tuple[int]]]] = None,
     ttm: bool = False,
@@ -989,7 +991,7 @@ def tt_svd(
             tensor indexes will be treated as physical indexes.
         error: Error of tensor approximation. All singular values
             lower than error * ||A|| * (n-1)^{-1/2}, where ||.|| is
-            the Frobenius norm.
+            the Frobenius norm. Defaults to ``1e-12``.
         max_rank: If given, set a bound for bond dimension
         physical_indexes: physical indices for tensor train format.
             For TTM, rows and columns must be paired: [(i_1, j_1), (i_2, j_2), ...]
@@ -1049,18 +1051,19 @@ def tt_svd(
                 prod([prod(pair) for pair in physical_indexes[i + 1 :]]),
             )
         )
-        U, S, V = svd(
+        U, S, _ = svd(
             matrix,
             full_matrices=False,
-            overwrite_a=True,
             check_finite=False,
             lapack_driver="gesvd",
         )
         next_bond = utils.truncated_bond(S, delta, max_rank)
         discarded_squared += float(np.sum(S[next_bond:] ** 2))
+        # U @ S @ V^T = M+E -> S @ V^T = U^-1 @ (M+E). To not carring out
+        # rounding error, we take only U^-1 @ M
         U, C = (
             U[:, :next_bond].reshape((bond,) + physical_indexes[i] + (next_bond,)),
-            np.diag(S[:next_bond]) @ V[:next_bond, :],
+            U[:, :next_bond].conj().T @ matrix,
         )
         cores.append(U)
         next_bond = C.shape[0]

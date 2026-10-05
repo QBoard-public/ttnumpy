@@ -86,7 +86,8 @@ print(train.bonds)                       # [1, 2, 2, 1]
 # arithmetic stays in the format
 left = tt.rand([2, 3, 4], ranks=3, seed=1)
 right = tt.rand([2, 3, 4], ranks=3, seed=2)
-combined = left + right                  # ranks add, then round
+combined = left + right                  # ranks add: [1, 6, 6, 1]
+rounded = combined.truncate()            # [1, 2, 4, 1]
 scaled = 0.5 * left
 
 # solve A x = b with the rank-adaptive AMEn solver

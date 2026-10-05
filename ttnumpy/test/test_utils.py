@@ -115,6 +115,16 @@ class TestTruncatedBond(unittest.TestCase):
         """For this spectrum the cutoff is 3.6e-15 and the smallest value 0.5."""
         self.assertEqual(utils.truncated_bond(self.SINGULAR_VALUES, 0.0), 4)
 
+    def test_the_noise_cutoff_follows_the_precision_of_the_values(self):
+        """The cutoff uses the machine epsilon of the singular values' dtype."""
+        # for two values led by 1 the cutoff is 4.4e-16 in float64, 2.4e-07 in
+        # float32; integers count as float64
+        for dtype, bond in ((np.float64, 2), (np.float32, 1)):
+            with self.subTest(dtype=np.dtype(dtype).name):
+                values = np.array([1.0, 1e-9], dtype=dtype)
+                self.assertEqual(utils.truncated_bond(values, 0.0), bond)
+        self.assertEqual(utils.truncated_bond(np.array([3, 1]), 0.0), 2)
+
 
 class TestOrthonormalize(unittest.TestCase):
     """QR sweeps must orthonormalize without changing the tensor."""

@@ -8,9 +8,6 @@ from typing import List, Optional
 import numpy as np
 from scipy.linalg import qr, rq, svd
 
-#: Relative cutoff below which a singular value is rounding noise rather than content.
-_SVD_RTOL = np.finfo(float).eps
-
 
 def tensor_norm(tensor: np.ndarray) -> float:
     """Frobenius tensor norm."""
@@ -33,6 +30,11 @@ def truncated_bond(
     is what enters the bound, so bounding it per split bounds the global
     error by the sum in quadrature over the splits.
 
+    Singular values at or below ``len(singular_values) * eps *
+    singular_values[0]`` count as zero, where ``eps`` is the machine epsilon
+    of their dtype (float64 for integers), so ``delta=0`` drops only the
+    rounding noise of that precision.
+
     Args:
         singular_values: Singular values in descending order.
         delta: Largest acceptable Frobenius norm of the discarded tail.
@@ -46,12 +48,15 @@ def truncated_bond(
     """
     if max_rank is not None and max_rank <= 0:
         raise ValueError("max_rank must be a positive integer.")
-    values = np.asarray(singular_values, dtype=float)
+    values = np.asarray(singular_values)
+    dtype = values.dtype if np.issubdtype(values.dtype, np.inexact) else np.float64
+    values = values.astype(float)
     # LAPACK reports a zero singular value anywhere between eps * sigma_max and
-    # exactly zero, so with delta=0 an untouched tail makes the bond follow the
-    # build rather than the matrix
+    # exactly zero, with eps of the precision it worked in, so with delta=0 an
+    # untouched tail makes the bond follow the build rather than the matrix
     if values.size:
-        values = np.where(values <= _SVD_RTOL * values.size * values[0], 0.0, values)
+        cutoff = np.finfo(dtype).eps * values.size * values[0]
+        values = np.where(values <= cutoff, 0.0, values)
     squares = values**2
     tail = np.concatenate([np.cumsum(squares[::-1])[::-1], [0.0]])
     bond = max(1, int(np.searchsorted(-tail, -(delta * delta), side="left")))

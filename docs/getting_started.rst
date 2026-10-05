@@ -81,7 +81,7 @@ or the class methods to combine and manipulate TTs.
 You can perform arithmetic using the full class methods (recommended for clarity)
 and also the Python operator shortcuts. The main methods are:
 
-- `TensorTrain.add(other, truncate=True)` — sum two tensor trains.
+- `TensorTrain.add(other, truncate=False)` — sum two tensor trains.
 - `TensorTrain.multiply(other, truncate=False)` — element-wise product (or multiply by scalar).
 - `TensorTrain.dot(other, truncate=False)` — matrix-by-vector / matrix-by-matrix product.
 

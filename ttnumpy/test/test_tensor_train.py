@@ -17,6 +17,17 @@ DECIMAL = 10
 _RNG_CORES = np.random.default_rng(40)
 
 
+def _sine_of_sum(size: int) -> tensor_train.TensorTrain:
+    """sin(10 (x + y)) on a ``size`` x ``size`` grid of [0, 1); TT and QTT rank 2."""
+    grid = np.arange(size) / size
+    return tensor_train.TensorTrain(
+        [
+            np.stack([np.sin(10 * grid), np.cos(10 * grid)], 1).reshape(1, size, 1, 2),
+            np.stack([np.cos(10 * grid), np.sin(10 * grid)]).reshape(2, size, 1, 1),
+        ]
+    )
+
+
 class TestTTMethods(unittest.TestCase):
     """Tests for base tensor train methods."""
 
@@ -750,6 +761,83 @@ class TestTTConstructors(unittest.TestCase):
         )
 
 
+class TestTTDefaultAccuracy(unittest.TestCase):
+    """Ranks of the SVD-based operations at their default accuracy."""
+
+    def test_qtt_keeps_exact_ranks_at_the_default_error(self):
+        """``tt_to_qtt`` and ``qtt_to_tt`` keep exact ranks at the default error."""
+        size = 2**8
+        grid = np.arange(size) / size
+        sine = _sine_of_sum(size)
+        # exp(i (10 x - 7 y)): complex, TT and QTT rank 1
+        phase = tensor_train.TensorTrain(
+            [
+                np.exp(10j * grid).reshape(1, size, 1, 1),
+                np.exp(-7j * grid).reshape(1, size, 1, 1),
+            ]
+        )
+        for name, train, rank in (("sine", sine, 2), ("phase", phase, 1)):
+            with self.subTest(train=name):
+                qtt = train.tt_to_qtt()
+                self.assertEqual(max(qtt.bonds), rank)
+                npt.assert_array_almost_equal(
+                    qtt.get_full_tensor().reshape(-1),
+                    train.get_full_tensor().reshape(-1),
+                    decimal=DECIMAL,
+                )
+                tt_back = qtt.qtt_to_tt([size, size])
+                self.assertEqual(tt_back.bonds, train.bonds)
+                npt.assert_array_almost_equal(
+                    tt_back.get_full_tensor().reshape(-1),
+                    train.get_full_tensor().reshape(-1),
+                    decimal=DECIMAL,
+                )
+
+    def test_qtt_without_a_target_adds_no_rank_from_rounding(self):
+        """``tt_to_qtt(error=0.0)`` keeps the exact QTT ranks of a core."""
+        qtt = _sine_of_sum(2**6).tt_to_qtt(error=0.0)
+        self.assertEqual(max(qtt.bonds), 2)
+
+    def test_tt_svd_keeps_exact_qtt_ranks_at_the_default_error(self):
+        """Exactly low-rank quantized data keeps its ranks at the default error."""
+        x8, x10, x12 = (np.arange(2**bits) / 2**bits for bits in (8, 10, 12))
+        # every unfolding has at most 6 rows and up to 2 ** 19 columns
+        for name, values, rank in (
+            ("exp(3x)", np.exp(3 * x12), 1),
+            ("sin(10(x+y))", np.sin(10 * (x8[:, None] + x8[None, :])), 2),
+            ("x^2+y^2", x10[:, None] ** 2 + x10[None, :] ** 2, 3),
+            ("exp(10ix)", np.exp(10j * x10), 1),
+        ):
+            with self.subTest(function=name):
+                bits = values.size.bit_length() - 1
+
+                tt = tensor_train.tt_svd(values.reshape([2] * bits))
+
+                self.assertEqual(max(tt.bonds), rank)
+                npt.assert_array_almost_equal(
+                    tt.get_full_tensor().reshape(-1),
+                    values.reshape(-1),
+                    decimal=DECIMAL,
+                )
+
+    def test_single_precision_drops_its_own_rounding_noise(self):
+        """The cutoff follows the precision of the data, here at 0.0 and 1e-12."""
+        grid = np.arange(32) / 32
+        sine = np.sin(10 * (grid[:, None] + grid[None, :]))
+        phase = np.exp(1j * (10 * grid[:, None] - 7 * grid[None, :]))
+        for values, dtype, rank in (
+            (sine, np.float64, 2),
+            (sine, np.float32, 2),
+            (phase, np.complex64, 1),
+        ):
+            for error in (0.0, 1e-12):
+                with self.subTest(dtype=np.dtype(dtype).name, error=error):
+                    tt = tensor_train.tt_svd(values.astype(dtype), error=error)
+
+                    self.assertEqual(tt.cores[0].dtype, dtype)
+                    self.assertEqual(tt.bonds, [1, rank, 1])
+
+
 class TestTTOperations(unittest.TestCase):
     """Tests for tensor trains operations."""
 
@@ -1249,6 +1337,52 @@ class TestTTArithmeticContracts(unittest.TestCase):
             rtol=1e-12,
             atol=1e-14,
         )
+
+    def test_add_keeps_the_dtype_of_its_operands(self):
+        """Complex and single-precision sums keep their dtype and their values."""
+        rng = np.random.default_rng(14)
+
+        def cast(train, dtype):
+            cores = [core.astype(dtype) for core in train.cores]
+            if np.issubdtype(dtype, np.complexfloating):
+                cores = [
+                    core * np.exp(2j * np.pi * rng.uniform(size=core.shape))
+                    for core in cores
+                ]
+            return tensor_train.TensorTrain(cores)
+
+        for dtype, rtol in ((np.complex128, 1e-12), (np.float32, 1e-5)):
+            with self.subTest(dtype=np.dtype(dtype).name):
+                lhs, rhs = cast(self.lhs, dtype), cast(self.rhs, dtype)
+                expected = lhs.get_full_tensor() + rhs.get_full_tensor()
+
+                total = lhs + rhs
+
+                self.assertEqual(total.cores[0].dtype, dtype)
+                npt.assert_allclose(
+                    total.get_full_tensor(),
+                    expected,
+                    rtol=rtol,
+                    atol=rtol * np.abs(expected).max(),
+                )
+
+    def test_operators_do_not_round(self):
+        """Ranks add under ``+`` and ``-`` and multiply under ``*`` and ``@``."""
+        lhs, rhs = self.lhs.bonds[1:-1], self.rhs.bonds[1:-1]
+        operator = tensor_train.rand(physical_indexes=[(2, 2)] * 3, ranks=2, seed=13)
+        sums = [a + b for a, b in zip(lhs, rhs)]
+        for name, result, expected in (
+            ("+", self.lhs + self.rhs, sums),
+            ("-", self.lhs - self.rhs, sums),
+            ("*", self.lhs * self.rhs, [a * b for a, b in zip(lhs, rhs)]),
+            (
+                "@",
+                operator @ self.lhs,
+                [a * b for a, b in zip(operator.bonds[1:-1], lhs)],
+            ),
+        ):
+            with self.subTest(operator=name):
+                self.assertEqual(result.bonds[1:-1], expected)
 
     def test_multiply_with_truncation_preserves_the_value(self):
         """``truncate=True`` may shrink the bonds but not change the tensor."""
