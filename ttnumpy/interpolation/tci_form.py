@@ -21,19 +21,23 @@ Sites are numbered from 0 and site indices run ``0 .. d-1``, where the paper
 counts both from 1. Indices are positions rather than values. ``T_s`` is the
 paper's ``T_{s+1}``, and ``P_b`` is its ``P_b``.
 
+:meth:`TensorCI.from_tensor_train` brings any tensor train into this form
+without sampling it.
+
 Reference:
     Y. Núñez Fernández et al., Learning tensor networks with tensor cross
     interpolation: new algorithms and libraries, SciPost Phys. 18, 104
-    (2025), Secs. 4.1 and 4.2.
+    (2025), Secs. 4.1, 4.2 and 4.5.1.
 """
 
 import operator
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
 from ttnumpy import tensor_train
-from ttnumpy.interpolation.black_box import BlackBox
+from ttnumpy.interpolation import prrlu
+from ttnumpy.interpolation.black_box import BlackBox, tt_as_black_box
 
 #: A configuration of some contiguous run of sites, one index per site.
 MultiIndex = Tuple[int, ...]
@@ -306,6 +310,103 @@ def _validate(dims: Tuple[int, ...], pivots: PivotLists) -> None:
             raise ValueError(f"pivots at bond {bond} lie outside dims {dims}.")
 
 
+def _extend_left(products: np.ndarray, core: np.ndarray) -> np.ndarray:
+    """Partial products extended by ``core``, one row per prefix and value.
+
+    Rows follow the order of :func:`append_site`.
+    """
+    return np.einsum("ia,asb->isb", products, core).reshape(-1, core.shape[2])
+
+
+def _extend_right(core: np.ndarray, products: np.ndarray) -> np.ndarray:
+    """Partial products extended by ``core``, one column per value and suffix.
+
+    Columns follow the order of :func:`prepend_site`.
+    """
+    return np.einsum("asb,bj->asj", core, products).reshape(core.shape[0], -1)
+
+
+def _spanning_prefixes(
+    cores: Sequence[np.ndarray],
+) -> Tuple[List[Tuple[MultiIndex, ...]], List[np.ndarray]]:
+    """Left-nested prefixes whose partial products span each left bond space.
+
+    Returns:
+        tuple: For bonds ``0 .. n_sites - 1``, the prefixes and their partial
+        products, one row per prefix.
+    """
+    prefixes, products = [((),)], [np.ones((1, 1))]
+    for site, core in enumerate(cores[:-1]):
+        rows = append_site(prefixes[site], core.shape[1])
+        extended = _extend_left(products[site], core)
+        kept = prrlu.prrlu(extended).row_pivots
+        prefixes.append(tuple(rows[index] for index in kept))
+        products.append(extended[kept])
+    return prefixes, products
+
+
+def _nested_suffixes(
+    cores: Sequence[np.ndarray],
+    prefixes: Sequence[Tuple[MultiIndex, ...]],
+    left: Sequence[np.ndarray],
+) -> Tuple[Dict[int, Tuple[MultiIndex, ...]], Dict[int, np.ndarray], MultiIndex]:
+    """Right-nested suffixes chosen from the tensor on ``prefixes``.
+
+    At each bond the number of suffixes is the rank of the tensor there.
+
+    Raises:
+        ValueError: If the tensor of the train is zero.
+
+    Returns:
+        tuple: For bonds ``1 .. n_sites``, the suffixes and their partial
+        products, one column per suffix; and the configuration of the largest
+        entry among the slices factorized.
+    """
+    suffixes, products = {len(cores): ((),)}, {len(cores): np.ones((1, 1))}
+    largest, largest_modulus = (), 0.0
+    for site in range(len(cores) - 1, 0, -1):
+        columns = prepend_site(suffixes[site + 1], cores[site].shape[1])
+        extended = _extend_right(cores[site], products[site + 1])
+        values = left[site] @ extended
+        factorization = prrlu.prrlu(values)
+        if not factorization.rank:
+            raise ValueError("the tensor train is zero, so it has no TCI form.")
+        # complete pivoting takes the largest entry of the slice first
+        row, column = factorization.row_pivots[0], factorization.col_pivots[0]
+        if abs(values[row, column]) > largest_modulus:
+            largest = prefixes[site][row] + columns[column]
+            largest_modulus = abs(values[row, column])
+        kept = factorization.col_pivots
+        suffixes[site] = tuple(columns[index] for index in kept)
+        products[site] = extended[:, kept]
+    return suffixes, products, largest
+
+
+def _nested_pivots(
+    cores: Sequence[np.ndarray],
+    suffixes: Dict[int, Tuple[MultiIndex, ...]],
+    right: Dict[int, np.ndarray],
+) -> PivotLists:
+    """Fully nested pivots, with prefixes chosen from the tensor on ``suffixes``.
+
+    Each factorization keeps every suffix, so their nesting holds.
+    """
+    bonds, prefixes, products = [], ((),), np.ones((1, 1))
+    for site, core in enumerate(cores[:-1]):
+        rows = append_site(prefixes, core.shape[1])
+        extended = _extend_left(products, core)
+        factorization = prrlu.prrlu(extended @ right[site + 1])
+        prefixes = tuple(rows[index] for index in factorization.row_pivots)
+        products = extended[factorization.row_pivots]
+        bonds.append(
+            (
+                prefixes,
+                [suffixes[site + 1][index] for index in factorization.col_pivots],
+            )
+        )
+    return PivotLists(bonds)
+
+
 class TensorCI:
     """A tensor in TCI form: pivot lists over a sampled tensor.
 
@@ -376,6 +477,48 @@ class TensorCI:
                 core = np.linalg.solve(pivot.T, core.T).T  # core @ inv(pivot)
             cores.append(core.reshape(len(left), self._dims[site], len(right)))
         return tensor_train.TensorTrain(cores)
+
+    @classmethod
+    def from_tensor_train(cls, train: tensor_train.TensorTrain) -> "TensorCI":
+        """Bring a tensor train into TCI form over its own elements.
+
+        The pivots come from the cores alone, through a forward, a backward
+        and a second forward half-sweep of exact factorizations. They are
+        fully nested, and each bond holds as many pivots as the numerical rank
+        of the tensor there, which can be below the bond dimension of
+        ``train``. :meth:`to_tensor_train` then returns the tensor of
+        ``train`` up to rounding.
+
+        The sampler is called once, at the largest entry among the slices
+        that the backward half-sweep factorizes. That entry is then the
+        largest modulus sampled, which relative thresholds scale by.
+
+        Costs ``O(n d chi^3)`` time for ``n`` sites of dimension ``d`` and
+        bond dimension ``chi``.
+
+        Args:
+            train: Tensor train in TT format.
+
+        Raises:
+            WrongTTType: If the train is in tensor train matrix format.
+            ValueError: If the tensor of the train is zero.
+
+        Returns:
+            TensorCI: The tensor of ``train``, sampled through
+            :func:`~ttnumpy.interpolation.black_box.tt_as_black_box`.
+
+        Reference:
+            Y. Núñez Fernández et al., Learning tensor networks with tensor
+            cross interpolation: new algorithms and libraries, SciPost Phys.
+            18, 104 (2025), Sec. 4.5.1.
+        """
+        box = tt_as_black_box(train)
+        cores = [core[:, :, 0, :] for core in train.cores]
+        prefixes, left = _spanning_prefixes(cores)
+        suffixes, right, largest = _nested_suffixes(cores, prefixes, left)
+        pivots = _nested_pivots(cores, suffixes, right)
+        box(largest)
+        return cls(box, [core.shape[1] for core in cores], pivots)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(dims={self._dims}, ranks={self._pivots.ranks})"

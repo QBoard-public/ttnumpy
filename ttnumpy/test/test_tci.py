@@ -1,254 +1,64 @@
 # Copyright (c) 2026 QBoard LLC. Licensed under the AGPLv3. See LICENSE.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Tests for the two-site update and the tci driver.
-
-Tensors here are written out or seeded, since the slice is compared entry by
-entry against the function it samples.
-"""
+"""Tests for the tci driver."""
 
 import unittest
 
 import numpy as np
 import numpy.testing as npt
+from tci_test_utils import RATIONAL_DIMS, dense, rational
 
 from ttnumpy import tensor_train
 from ttnumpy.interpolation import black_box, tci, tci_form
 
-RTOL = 1e-12
 
-DIMS = (2, 3, 2, 2)
+def _two_deltas(indices) -> float:
+    """1 at the all-zero and the all-one configuration, 0 elsewhere."""
+    return float(all(i == 0 for i in indices) or all(i == 1 for i in indices))
 
 
-def _dense_box(tensor: np.ndarray) -> black_box.BlackBox:
-    """Sample a dense tensor by index."""
-    return black_box.BlackBox(lambda indices: float(tensor[tuple(indices)]))
+def _quantics_peak(indices) -> float:
+    """0.1 plus a Gaussian peak of width 0.005 at x = 0.3, x read from the bits."""
+    x = sum(bit / 2.0 ** (position + 1) for position, bit in enumerate(indices))
+    return 0.1 + np.exp(-(((x - 0.3) / 0.005) ** 2))
 
 
-def _digits_box() -> black_box.BlackBox:
-    """Return the configuration read as decimal digits, so entries spell it."""
-    return black_box.BlackBox(
-        lambda indices: float("".join(str(index) for index in indices))
-    )
+def _heaviside_corner(indices) -> float:
+    """1 plus the product of Heaviside steps at 0, on ten nodes per variable.
 
+    The nodes span [-1, 1] and miss 0, so the product is 1 where every
+    variable is positive and 0 elsewhere.
+    """
+    nodes = np.linspace(-1.0, 1.0, 10)
+    return 1.0 + float(all(nodes[i] > 0.0 for i in indices))
 
-def _product_tensor(seed: int) -> np.ndarray:
-    """A rank-one tensor, the outer product of one vector per site."""
-    rng = np.random.default_rng(seed)
-    factors = [rng.standard_normal(dim) for dim in DIMS]
-    tensor = factors[0]
-    for factor in factors[1:]:
-        tensor = np.multiply.outer(tensor, factor)
-    return tensor
 
-
-def _tensor_ci(box, configuration, dims=DIMS) -> tci_form.TensorCI:
-    """A TCI form of rank one, with every pivot taken from ``configuration``."""
-    pivots = tci_form.PivotLists.from_configuration(configuration)
-    return tci_form.TensorCI(box, dims, pivots)
-
-
-def _bond_pivots(tensor_ci: tci_form.TensorCI, bond: int) -> tuple:
-    """The row and column pivots of ``tensor_ci`` at ``bond``."""
-    return tensor_ci.pivots.left(bond), tensor_ci.pivots.right(bond)
-
-
-def _sweep(tensor_ci: tci_form.TensorCI, half_sweeps: int, tolerance=0.0) -> None:
-    """Alternate forward and backward half-sweeps, forward first."""
-    n_sites = len(tensor_ci.dims)
-    forward, backward = range(1, n_sites), range(n_sites - 1, 0, -1)
-    for half_sweep in range(half_sweeps):
-        for bond in backward if half_sweep % 2 else forward:
-            tci.update_bond(tensor_ci, bond, tolerance)
-
-
-def _sine_box(dtype) -> black_box.BlackBox:
-    """sin(x1 + ... + xn) on eight nodes per site, returned as ``dtype``."""
-    nodes = np.linspace(-1.0, 1.0, 8)
-    return black_box.BlackBox(lambda idx: dtype(np.sin(sum(nodes[i] for i in idx))))
-
-
-class TestTwoSiteSlice(unittest.TestCase):
-    """The slice samples the tensor over the free sites at one bond."""
-
-    CONFIGURATION = [1, 0, 1, 1]
-
-    def test_entries_are_the_function_at_row_plus_column(self):
-        tensor = np.random.default_rng(0).standard_normal(DIMS)
-        tensor_ci = _tensor_ci(_dense_box(tensor), self.CONFIGURATION)
-
-        matrix, rows, columns = tci.two_site_slice(tensor_ci, 2)
-
-        for r, row in enumerate(rows):
-            for c, column in enumerate(columns):
-                with self.subTest(row=row, column=column):
-                    npt.assert_allclose(matrix[r, c], tensor[row + column], rtol=RTOL)
-
-    def test_row_and_column_order_follows_the_site_extensions(self):
-        """Entries spell their configuration, so the order is read directly."""
-        tensor_ci = _tensor_ci(_digits_box(), self.CONFIGURATION)
-
-        matrix, rows, columns = tci.two_site_slice(tensor_ci, 2)
-
-        self.assertEqual(rows, [(1, 0), (1, 1), (1, 2)])
-        self.assertEqual(columns, [(0, 1), (1, 1)])
-        npt.assert_allclose(
-            matrix,
-            [[1001.0, 1011.0], [1101.0, 1111.0], [1201.0, 1211.0]],
-            rtol=RTOL,
-        )
-
-    def test_rows_and_columns_span_the_sites_their_bond_implies(self):
-        tensor_ci = _tensor_ci(_dense_box(np.ones(DIMS)), self.CONFIGURATION)
-        for bond in range(1, len(DIMS)):
-            with self.subTest(bond=bond):
-                _, rows, columns = tci.two_site_slice(tensor_ci, bond)
-                self.assertTrue(all(len(row) == bond for row in rows))
-                self.assertTrue(
-                    all(len(column) == len(DIMS) - bond for column in columns)
-                )
-
-    def test_rows_extend_the_left_neighbour_and_columns_the_right(self):
-        tensor_ci = _tensor_ci(_dense_box(np.ones(DIMS)), self.CONFIGURATION)
-
-        _, rows, columns = tci.two_site_slice(tensor_ci, 2)
-
-        self.assertTrue(all(row[:-1] in tensor_ci.pivots.left(1) for row in rows))
-        self.assertTrue(
-            all(column[1:] in tensor_ci.pivots.right(3) for column in columns)
-        )
-
-    def test_costs_one_evaluation_per_entry(self):
-        """The evaluation count is what a run of TCI is charged for."""
-        box = _dense_box(np.random.default_rng(1).standard_normal(DIMS))
-
-        matrix, _, _ = tci.two_site_slice(_tensor_ci(box, self.CONFIGURATION), 2)
-
-        self.assertEqual(box.n_evals, matrix.size)
-
-    def test_rejects_a_bond_without_two_free_sites(self):
-        tensor_ci = _tensor_ci(_dense_box(np.ones(DIMS)), self.CONFIGURATION)
-        for bond in (0, len(DIMS)):
-            with self.subTest(bond=bond):
-                with self.assertRaises(ValueError):
-                    tci.two_site_slice(tensor_ci, bond)
-
-
-class TestUpdateBond(unittest.TestCase):
-    """The update replaces one bond's pivots with those of its slice."""
-
-    CONFIGURATION = [1, 0, 1, 1]
-
-    def test_selects_the_largest_entry_when_one_pivot_is_kept(self):
-        """A lone spike fixes which row and column a rank-one update takes."""
-        tensor = np.zeros(DIMS)
-        tensor[1, 2, 1, 0] = 5.0
-        tensor_ci = _tensor_ci(_dense_box(tensor), [1, 2, 1, 0])
-
-        result = tci.update_bond(tensor_ci, 2, max_rank=1)
-
-        self.assertEqual(result.rank, 1)
-        self.assertEqual(tensor_ci.pivots.left(2), ((1, 2),))
-        self.assertEqual(tensor_ci.pivots.right(2), ((1, 0),))
-
-    def test_new_lists_are_nested_with_their_neighbours(self):
-        box = _dense_box(np.random.default_rng(2).standard_normal(DIMS))
-        tensor_ci = _tensor_ci(box, self.CONFIGURATION)
-
-        tci.update_bond(tensor_ci, 2)
-
-        self.assertTrue(tensor_ci.pivots.is_left_nested_at(2))
-        self.assertTrue(tensor_ci.pivots.is_right_nested_at(2))
-
-    def test_leaves_every_other_bond_alone(self):
-        box = _dense_box(np.random.default_rng(3).standard_normal(DIMS))
-        tensor_ci = _tensor_ci(box, self.CONFIGURATION)
-        others = [bond for bond in range(1, len(DIMS)) if bond != 2]
-        before = {bond: _bond_pivots(tensor_ci, bond) for bond in others}
-
-        tci.update_bond(tensor_ci, 2)
-
-        for bond in others:
-            with self.subTest(bond=bond):
-                self.assertEqual(_bond_pivots(tensor_ci, bond), before[bond])
-
-    def test_a_product_tensor_needs_one_pivot(self):
-        tensor_ci = _tensor_ci(_dense_box(_product_tensor(4)), self.CONFIGURATION)
-
-        result = tci.update_bond(tensor_ci, 2, tolerance=1e-10)
-
-        self.assertEqual(result.rank, 1)
-        self.assertLess(result.pivot_error, 1e-10)
-
-    def test_max_rank_caps_the_pivots_kept(self):
-        box = _dense_box(np.random.default_rng(5).standard_normal(DIMS))
-        tensor_ci = _tensor_ci(box, self.CONFIGURATION)
-
-        result = tci.update_bond(tensor_ci, 2, max_rank=1)
-
-        self.assertEqual(result.rank, 1)
-        self.assertEqual(tensor_ci.pivots.ranks[2], 1)
-
-    def test_a_slice_below_tolerance_leaves_the_lists_untouched(self):
-        """An empty bond would not describe a tensor train."""
-        tensor_ci = _tensor_ci(_dense_box(np.zeros(DIMS)), self.CONFIGURATION)
-        before = _bond_pivots(tensor_ci, 2)
-
-        result = tci.update_bond(tensor_ci, 2, tolerance=1e-8)
-
-        self.assertEqual(result.rank, 0)
-        self.assertEqual(_bond_pivots(tensor_ci, 2), before)
-
-    def test_sweeping_to_convergence_leaves_every_bond_nested(self):
-        """sin(x1 + x2 + x3 + x4) has rank 2 at every internal bond."""
-        tensor_ci = _tensor_ci(_sine_box(float), [7, 7, 7, 0], dims=(8, 8, 8, 8))
-
-        _sweep(tensor_ci, 4, tolerance=1e-10)
-
-        self.assertEqual(tensor_ci.pivots.ranks, [1, 2, 2, 2, 1])
-        self.assertTrue(tensor_ci.pivots.is_fully_nested())
-
-    def test_a_zero_tolerance_keeps_no_rounding_noise(self):
-        """The noise level follows the precision of the sampled values."""
-        for dtype in (np.float32, np.float64):
-            with self.subTest(dtype=dtype):
-                box = _sine_box(dtype)
-                tensor_ci = _tensor_ci(box, [7, 7, 7, 0], dims=(8, 8, 8, 8))
-
-                _sweep(tensor_ci, 4)
-
-                self.assertEqual(tensor_ci.pivots.ranks, [1, 2, 2, 2, 1])
-                self.assertLess(box.n_evals, 8**4)
-
-
-def _rational(indices) -> float:
-    """1 / (1 + 10 (x1 + ... + x5)) on six nodes in [0, 1] per site."""
-    nodes = np.linspace(0.0, 1.0, 6)
-    return 1.0 / (1.0 + 10.0 * sum(nodes[i] for i in indices))
-
-
-RATIONAL_DIMS = (6, 6, 6, 6, 6)
-
-
-def _dense(function, dims) -> np.ndarray:
-    """Every element of the tensor behind ``function``."""
-    return np.array([function(index) for index in np.ndindex(*dims)]).reshape(dims)
+def _train_error(tensor_ci: tci_form.TensorCI, full: np.ndarray) -> float:
+    """Largest deviation of the contracted train from ``full``."""
+    return np.abs(tensor_ci.to_tensor_train().get_full_tensor() - full).max()
 
 
 class TestTci(unittest.TestCase):
     """The driver sweeps until the ranks settle within the error threshold."""
 
     def test_finds_ranks_above_the_local_dimension(self):
-        """The middle ranks, 10, exceed d = 6 and take more than one sweep."""
+        """The middle ranks, 10, exceed d = 6 and take more than one half-sweep.
+
+        The first half-sweep exhausts slices of six columns, with zero error.
+        """
         error_threshold = 1e-12
-        full = _dense(_rational, RATIONAL_DIMS)
+        full = dense(rational, RATIONAL_DIMS)
 
         tensor_ci, info = tci.tci(
-            _rational, RATIONAL_DIMS, [0] * 5, error_threshold, return_info=True
+            rational, RATIONAL_DIMS, [[0] * 5], error_threshold, return_info=True
         )
 
         self.assertTrue(info.converged)
-        self.assertLessEqual(info.pivot_error, error_threshold)
+        self.assertEqual(info.num_half_sweeps_run, 3)
+        self.assertEqual(info.max_ranks, (6, 10, 10))
+        self.assertEqual(info.pivot_errors[0], 0.0)
+        self.assertLessEqual(max(info.pivot_errors[1:]), error_threshold)
         self.assertEqual(tensor_ci.pivots.ranks, [1, 6, 10, 10, 6, 1])
         error = np.abs(tensor_ci.to_tensor_train().get_full_tensor() - full).max()
         self.assertLess(error, 10 * error_threshold * np.abs(full).max())
@@ -260,7 +70,7 @@ class TestTci(unittest.TestCase):
         tensor_ci, info = tci.tci(
             black_box.tt_as_black_box(train),
             (3, 4, 3, 4, 3),
-            [0] * 5,
+            [[0] * 5],
             1e-12,
             return_info=True,
         )
@@ -273,13 +83,21 @@ class TestTci(unittest.TestCase):
 
     def test_the_error_threshold_is_relative_to_the_sampled_values(self):
         """Scaling by a power of two is exact, so the runs match pivot for pivot."""
-        small = tci.tci(_rational, RATIONAL_DIMS, [0] * 5)
-        large = tci.tci(lambda idx: 2.0**40 * _rational(idx), RATIONAL_DIMS, [0] * 5)
+        small, small_info = tci.tci(
+            rational, RATIONAL_DIMS, [[0] * 5], return_info=True
+        )
+        large, large_info = tci.tci(
+            lambda idx: 2.0**40 * rational(idx),
+            RATIONAL_DIMS,
+            [[0] * 5],
+            return_info=True,
+        )
 
         for bond in range(1, 5):
             with self.subTest(bond=bond):
                 self.assertEqual(large.pivots.left(bond), small.pivots.left(bond))
                 self.assertEqual(large.pivots.right(bond), small.pivots.right(bond))
+        self.assertEqual(large_info.pivot_errors, small_info.pivot_errors)
 
     def test_single_precision_and_complex_values(self):
         nodes = np.linspace(-1.0, 1.0, 8)
@@ -298,7 +116,7 @@ class TestTci(unittest.TestCase):
         for name, (function, error_threshold) in cases.items():
             with self.subTest(values=name):
                 tensor_ci, info = tci.tci(
-                    function, (8, 8, 8, 8), [0] * 4, error_threshold, return_info=True
+                    function, (8, 8, 8, 8), [[0] * 4], error_threshold, return_info=True
                 )
                 self.assertTrue(info.converged)
                 self.assertEqual(tensor_ci.pivots.ranks, [1, 2, 2, 2, 1])
@@ -308,9 +126,9 @@ class TestTci(unittest.TestCase):
         error_threshold = 1e-12
         with self.assertLogs("ttnumpy", level="WARNING"):
             tensor_ci, info = tci.tci(
-                _rational,
+                rational,
                 RATIONAL_DIMS,
-                [0] * 5,
+                [[0] * 5],
                 error_threshold,
                 max_rank=3,
                 return_info=True,
@@ -318,7 +136,7 @@ class TestTci(unittest.TestCase):
 
         self.assertLessEqual(max(tensor_ci.pivots.ranks), 3)
         self.assertFalse(info.converged)
-        self.assertGreater(info.pivot_error, error_threshold)
+        self.assertGreater(info.pivot_errors[-1], error_threshold)
 
     def test_converges_while_the_pivots_keep_changing(self):
         """Pivots that keep changing between half-sweeps do not block convergence."""
@@ -348,7 +166,7 @@ class TestTci(unittest.TestCase):
                 tensor_ci, info = tci.tci(
                     function,
                     (dim,) * n_sites,
-                    [dim // 2] * n_sites,
+                    [[dim // 2] * n_sites],
                     1e-10,
                     return_info=True,
                 )
@@ -364,9 +182,9 @@ class TestTci(unittest.TestCase):
         """One half-sweep leaves the ranks at d = 6, below the true 10."""
         with self.assertLogs("ttnumpy", level="WARNING"):
             _, info = tci.tci(
-                _rational,
+                rational,
                 RATIONAL_DIMS,
-                [0] * 5,
+                [[0] * 5],
                 1e-12,
                 max_half_sweeps=1,
                 return_info=True,
@@ -376,36 +194,156 @@ class TestTci(unittest.TestCase):
         self.assertEqual(info.num_half_sweeps_run, 1)
 
     def test_returns_the_tensor_ci_alone_unless_info_is_asked_for(self):
-        result = tci.tci(_rational, RATIONAL_DIMS, [0] * 5)
+        result = tci.tci(rational, RATIONAL_DIMS, [[0] * 5])
         self.assertIsInstance(result, tci_form.TensorCI)
 
     def test_uses_a_given_black_box_as_it_is(self):
-        box = black_box.BlackBox(_rational)
+        box = black_box.BlackBox(rational)
 
-        tensor_ci = tci.tci(box, RATIONAL_DIMS, [0] * 5)
+        tensor_ci = tci.tci(box, RATIONAL_DIMS, [[0] * 5])
 
         self.assertIs(tensor_ci.box, box)
 
-    def test_rejects_an_initial_pivot_where_the_tensor_vanishes(self):
+    def test_starts_from_every_initial_pivot(self):
+        """From one delta the other is missed; from both, the train is exact."""
+        dims = (2,) * 6
+        full = dense(_two_deltas, dims)
+
+        one = tci.tci(_two_deltas, dims, [[0] * 6])
+        both = tci.tci(_two_deltas, dims, [[0] * 6, [1] * 6])
+
+        self.assertEqual(_train_error(one, full), 1.0)
+        self.assertEqual(both.pivots.ranks, [1, 2, 2, 2, 2, 2, 1])
+        self.assertLess(_train_error(both, full), 1e-12)
+
+    def test_rejects_initial_pivots_where_the_tensor_vanishes(self):
         nodes = np.linspace(0.0, 1.0, 4)
+
+        def product(indices) -> float:
+            return float(np.prod(nodes[list(indices)]))
+
         with self.assertRaises(ValueError):
-            tci.tci(lambda idx: np.prod(nodes[list(idx)]), (4, 4, 4), [0, 0, 0])
+            tci.tci(product, (4, 4, 4), [[0, 0, 0], [0, 1, 2]])
+        tensor_ci = tci.tci(product, (4, 4, 4), [[0, 0, 0], [1, 1, 1]])
+
+        self.assertEqual(tensor_ci.pivots.ranks, [1, 1, 1, 1])
 
     def test_rejects_invalid_arguments_before_evaluating(self):
-        for dims, initial_pivot, options in [
-            (RATIONAL_DIMS, [0] * 5, {"error_threshold": -1.0}),
-            (RATIONAL_DIMS, [0] * 5, {"error_threshold": float("nan")}),
-            (RATIONAL_DIMS, [0] * 5, {"max_rank": 0}),
-            (RATIONAL_DIMS, [0] * 5, {"max_half_sweeps": 0}),
-            (RATIONAL_DIMS, [0] * 4, {}),
+        for dims, initial_pivots, options in [
+            (RATIONAL_DIMS, [[0] * 5], {"error_threshold": -1.0}),
+            (RATIONAL_DIMS, [[0] * 5], {"error_threshold": float("nan")}),
+            (RATIONAL_DIMS, [[0] * 5], {"max_rank": 0}),
+            (RATIONAL_DIMS, [[0] * 5], {"max_half_sweeps": 0}),
+            (RATIONAL_DIMS, [[0] * 4], {}),
+            (RATIONAL_DIMS, [], {}),
+            (RATIONAL_DIMS, [[0] * 5, [0] * 4], {}),
+            (RATIONAL_DIMS, [[0, 0, 0, 0, 6]], {}),
             # the two-site slices around a site of dimension 1 cannot grow a rank
-            ((6, 1, 6, 6, 6), [0] * 5, {}),
+            ((6, 1, 6, 6, 6), [[0] * 5], {}),
         ]:
-            with self.subTest(dims=dims, initial_pivot=initial_pivot, options=options):
-                box = black_box.BlackBox(_rational)
+            with self.subTest(
+                dims=dims, initial_pivots=initial_pivots, options=options
+            ):
+                box = black_box.BlackBox(rational)
                 with self.assertRaises(ValueError):
-                    tci.tci(box, dims, initial_pivot, **options)
+                    tci.tci(box, dims, initial_pivots, **options)
                 self.assertEqual(box.n_evals, 0)
+
+    def test_rejects_initial_pivots_that_are_not_integer_sequences(self):
+        """A flat list is the single configuration of an older signature."""
+        box = black_box.BlackBox(rational)
+        for initial_pivots in ([[0.5] * 5], [0] * 5):
+            with self.subTest(initial_pivots=initial_pivots):
+                with self.assertRaises(TypeError):
+                    tci.tci(box, RATIONAL_DIMS, initial_pivots)
+        self.assertEqual(box.n_evals, 0)
+
+
+class TestAddGlobalPivots(unittest.TestCase):
+    """Global pivots reach features that 2-site sweeps alone miss."""
+
+    def test_recovers_a_delta_that_tci_missed(self):
+        """The two-delta example of the reference, Appendix B.3.5."""
+        dims = (2,) * 6
+        full = dense(_two_deltas, dims)
+        tensor_ci = tci.tci(_two_deltas, dims, [[0] * 6])
+        self.assertEqual(_train_error(tensor_ci, full), 1.0)
+
+        result, info = tci.add_global_pivots(tensor_ci, [[1] * 6], return_info=True)
+
+        self.assertIs(result, tensor_ci)
+        self.assertTrue(info.converged)
+        self.assertLess(_train_error(tensor_ci, full), 1e-12)
+
+    def test_any_pivot_in_the_upper_region_of_a_step_recovers_it(self):
+        """1 + H(x1) H(x2) H(x3), started where every variable is negative.
+
+        Every 2-site slice through the start pins one variable to a negative
+        node, so no slice reaches the region where all three are positive and
+        tci converges on the constant 1.
+        """
+        dims = (10,) * 3
+        full = dense(_heaviside_corner, dims)
+        for pivot in ([9, 9, 9], [5, 6, 8], [5, 5, 5]):
+            with self.subTest(pivot=pivot):
+                tensor_ci, info = tci.tci(
+                    _heaviside_corner, dims, [[0, 0, 0]], return_info=True
+                )
+                self.assertTrue(info.converged)
+                self.assertEqual(_train_error(tensor_ci, full), 1.0)
+
+                tci.add_global_pivots(tensor_ci, [pivot])
+
+                self.assertEqual(tensor_ci.pivots.ranks, [1, 2, 2, 1])
+                self.assertLess(_train_error(tensor_ci, full), 1e-12)
+
+    def test_sweeps_grow_a_peak_from_one_pivot(self):
+        """Inserting the centre of the peak gives rank 2; the sweeps grow it."""
+        dims = (2,) * 10
+        full = dense(_quantics_peak, dims)
+        tensor_ci = tci.tci(_quantics_peak, dims, [[0] * 10])
+        self.assertGreater(_train_error(tensor_ci, full), 0.5)
+        # 307 / 1024 is the grid point nearest x = 0.3
+        centre = [int(bit) for bit in np.binary_repr(307, 10)]
+
+        tci.add_global_pivots(tensor_ci, [centre])
+
+        self.assertGreater(max(tensor_ci.pivots.ranks), 2)
+        self.assertLess(_train_error(tensor_ci, full), 1e-6 * np.abs(full).max())
+
+    def test_zero_and_repeated_proposals_add_nothing(self):
+        dims = (2,) * 6
+        full = dense(_two_deltas, dims)
+        tensor_ci = tci.tci(_two_deltas, dims, [[0] * 6, [1] * 6])
+        ranks = tensor_ci.pivots.ranks
+
+        tci.add_global_pivots(tensor_ci, [[0, 1, 0, 1, 0, 1], [1] * 6, [1] * 6])
+
+        self.assertEqual(tensor_ci.pivots.ranks, ranks)
+        self.assertLess(_train_error(tensor_ci, full), 1e-12)
+
+    def test_returns_the_form_alone_unless_info_is_asked_for(self):
+        tensor_ci = tci.tci(rational, RATIONAL_DIMS, [[0] * 5])
+
+        self.assertIs(tci.add_global_pivots(tensor_ci, [[5] * 5]), tensor_ci)
+
+    def test_rejects_invalid_arguments_before_evaluating(self):
+        tensor_ci = tci.tci(rational, RATIONAL_DIMS, [[0] * 5])
+        n_evals = tensor_ci.box.n_evals
+        for configurations, options in [
+            ([], {}),
+            ([[0] * 4], {}),
+            ([[0, 0, 0, 0, 6]], {}),
+            ([[5] * 5], {"error_threshold": -1.0}),
+            ([[5] * 5], {"max_rank": 0}),
+            ([[5] * 5], {"max_half_sweeps": 0}),
+        ]:
+            with self.subTest(configurations=configurations, options=options):
+                with self.assertRaises(ValueError):
+                    tci.add_global_pivots(tensor_ci, configurations, **options)
+        with self.assertRaises(TypeError):
+            tci.add_global_pivots(tensor_ci, [[0.5] * 5])
+        self.assertEqual(tensor_ci.box.n_evals, n_evals)
 
 
 if __name__ == "__main__":

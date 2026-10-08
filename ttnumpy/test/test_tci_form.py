@@ -14,9 +14,10 @@ import unittest
 
 import numpy as np
 import numpy.testing as npt
+from tci_test_utils import RATIONAL_DIMS, dense, dense_box, rational
 
 from ttnumpy import tensor_train
-from ttnumpy.interpolation import black_box, tci, tci_form
+from ttnumpy.interpolation import black_box, sweeps, tci, tci_form
 
 RTOL = 1e-10
 ATOL = 1e-12
@@ -41,11 +42,6 @@ def _table_1_with(bond, row, column):
     return tci_form.PivotLists(bonds)
 
 
-def _dense_box(tensor: np.ndarray) -> black_box.BlackBox:
-    """Sample a dense tensor by index."""
-    return black_box.BlackBox(lambda indices: tensor[indices])
-
-
 def _slice_configurations(pivots: tci_form.PivotLists, dims) -> list:
     """Every configuration of every ``T_s`` the pivots define."""
     return [
@@ -55,16 +51,6 @@ def _slice_configurations(pivots: tci_form.PivotLists, dims) -> list:
             pivots.left(site), range(dim), pivots.right(site + 1)
         )
     ]
-
-
-def _sweep(tensor_ci: tci_form.TensorCI, half_sweeps: int, tolerance: float) -> None:
-    """Alternate forward and backward half-sweeps of two-site updates."""
-    n_sites = len(tensor_ci.dims)
-    for half_sweep in range(half_sweeps):
-        forward = half_sweep % 2 == 0
-        bonds = range(1, n_sites) if forward else range(n_sites - 1, 0, -1)
-        for bond in bonds:
-            tci.update_bond(tensor_ci, bond, tolerance)
 
 
 class TestSplitConfiguration(unittest.TestCase):
@@ -274,22 +260,22 @@ class TestTensorCI(unittest.TestCase):
     """The pivots must index a tensor train over the given dims."""
 
     def test_rejects_dims_of_the_wrong_length(self):
-        box = _dense_box(np.ones(TABLE_1_DIMS))
+        box = dense_box(np.ones(TABLE_1_DIMS))
         with self.assertRaises(ValueError):
             tci_form.TensorCI(box, TABLE_1_DIMS[:-1], tci_form.PivotLists(TABLE_1))
 
     def test_rejects_a_single_site(self):
-        box = _dense_box(np.ones(3))
+        box = dense_box(np.ones(3))
         with self.assertRaises(ValueError):
             tci_form.TensorCI(box, (3,), tci_form.PivotLists.from_configuration([0]))
 
     def test_rejects_dimensions_that_are_not_integers(self):
         pivots = tci_form.PivotLists.from_configuration([0, 0, 0])
         with self.assertRaises(TypeError):
-            tci_form.TensorCI(_dense_box(np.ones((3, 3, 3))), (3.0, 3.0, 3.0), pivots)
+            tci_form.TensorCI(dense_box(np.ones((3, 3, 3))), (3.0, 3.0, 3.0), pivots)
 
     def test_rejects_pivots_outside_the_dims(self):
-        box = _dense_box(np.ones((3, 3, 3)))
+        box = dense_box(np.ones((3, 3, 3)))
         for configuration in ([0, 3, 1], [0, 0, 5]):
             with self.subTest(configuration=configuration):
                 pivots = tci_form.PivotLists.from_configuration(configuration)
@@ -300,15 +286,15 @@ class TestTensorCI(unittest.TestCase):
         dims = (2, 3, 2, 2)
         tensor = np.random.default_rng(0).standard_normal(dims)
         pivots = tci_form.PivotLists.from_configuration([1, 0, 1, 1])
-        tensor_ci = tci_form.TensorCI(_dense_box(tensor), dims, pivots)
+        tensor_ci = tci_form.TensorCI(dense_box(tensor), dims, pivots)
 
-        tci.update_bond(tensor_ci, 2)
+        sweeps.two_site_update(tensor_ci, 2)
 
         self.assertEqual(tensor_ci.to_tensor_train().bonds, [1, 1, 2, 1, 1])
 
     def test_repr_reports_the_ranks(self):
         tensor_ci = tci_form.TensorCI(
-            _dense_box(np.ones(TABLE_1_DIMS)),
+            dense_box(np.ones(TABLE_1_DIMS)),
             TABLE_1_DIMS,
             tci_form.PivotLists(TABLE_1),
         )
@@ -321,7 +307,7 @@ class TestToTensorTrain(unittest.TestCase):
     def test_cores_follow_the_ranks_and_dims(self):
         tensor = np.random.default_rng(1).standard_normal(TABLE_1_DIMS)
         tensor_ci = tci_form.TensorCI(
-            _dense_box(tensor), TABLE_1_DIMS, tci_form.PivotLists(TABLE_1)
+            dense_box(tensor), TABLE_1_DIMS, tci_form.PivotLists(TABLE_1)
         )
 
         train = tensor_ci.to_tensor_train()
@@ -342,7 +328,7 @@ class TestToTensorTrain(unittest.TestCase):
 
         for name, tensor in tensors.items():
             with self.subTest(dtype=name):
-                tensor_ci = tci_form.TensorCI(_dense_box(tensor), TABLE_1_DIMS, pivots)
+                tensor_ci = tci_form.TensorCI(dense_box(tensor), TABLE_1_DIMS, pivots)
                 full = tensor_ci.to_tensor_train().get_full_tensor()
                 npt.assert_allclose(
                     [full[index] for index in configurations],
@@ -350,43 +336,6 @@ class TestToTensorTrain(unittest.TestCase):
                     rtol=RTOL,
                     atol=ATOL,
                 )
-
-    def test_reproduces_a_low_rank_tensor_after_sweeping(self):
-        """Middle rank 5 exceeds the dimension 3, so it takes several sweeps."""
-        dims = (3, 3, 3, 3)
-        train = tensor_train.rand(list(dims), ranks=5, seed=3)
-        full = train.get_full_tensor()
-        tensor_ci = tci_form.TensorCI(
-            black_box.tt_as_black_box(train),
-            dims,
-            tci_form.PivotLists.from_configuration([0, 0, 0, 0]),
-        )
-
-        _sweep(tensor_ci, 4, tolerance=1e-12 * np.abs(full).max())
-
-        self.assertEqual(tensor_ci.pivots.ranks, [1, 3, 5, 3, 1])
-        self.assertTrue(tensor_ci.pivots.is_fully_nested())
-        npt.assert_allclose(
-            tensor_ci.to_tensor_train().get_full_tensor(), full, rtol=RTOL, atol=ATOL
-        )
-
-    def test_a_half_sweep_leaves_nothing_new_to_evaluate(self):
-        """Every T_s and P_b lies in a slice that the last updates sampled."""
-        dims = (4, 4, 4, 4)
-        train = tensor_train.rand(list(dims), ranks=3, seed=4)
-        for half_sweeps in (1, 2):
-            with self.subTest(half_sweeps=half_sweeps):
-                tensor_ci = tci_form.TensorCI(
-                    black_box.tt_as_black_box(train),
-                    dims,
-                    tci_form.PivotLists.from_configuration([0, 0, 0, 0]),
-                )
-                _sweep(tensor_ci, half_sweeps, tolerance=1e-12)
-                evaluated = tensor_ci.box.n_evals
-
-                tensor_ci.to_tensor_train()
-
-                self.assertEqual(tensor_ci.box.n_evals, evaluated)
 
     def test_integer_values_give_floating_point_cores(self):
         box = black_box.BlackBox(lambda indices: sum(indices) + 1)
@@ -397,12 +346,99 @@ class TestToTensorTrain(unittest.TestCase):
 
     def test_a_singular_pivot_matrix_raises(self):
         tensor_ci = tci_form.TensorCI(
-            _dense_box(np.zeros(TABLE_1_DIMS)),
+            dense_box(np.zeros(TABLE_1_DIMS)),
             TABLE_1_DIMS,
             tci_form.PivotLists(TABLE_1),
         )
         with self.assertRaises(np.linalg.LinAlgError):
             tensor_ci.to_tensor_train()
+
+
+def _complex_train() -> tensor_train.TensorTrain:
+    """exp(i s) + exp(2i s) for s = x1 + ... + x4 on eight nodes per site."""
+    nodes = np.linspace(-1.0, 1.0, 8)
+    total = sum(np.ix_(*[nodes] * 4))
+    return tensor_train.tt_svd(np.exp(1j * total) + np.exp(2j * total), error=0)
+
+
+class TestFromTensorTrain(unittest.TestCase):
+    """CI-canonicalization brings a tensor train into TCI form from its cores."""
+
+    def test_round_trips_a_train_with_fully_nested_pivots(self):
+        single = tensor_train.rand([2, 3, 2, 3, 2, 3], ranks=3, seed=1)
+        for name, train in {
+            "random": tensor_train.rand([3, 4, 3, 4, 3], ranks=4, seed=7),
+            "doubled": single + single,
+            "quantics": tensor_train.rand([2] * 8, ranks=5, seed=3),
+            "complex": _complex_train(),
+        }.items():
+            with self.subTest(train=name):
+                tensor_ci = tci_form.TensorCI.from_tensor_train(train)
+
+                self.assertTrue(tensor_ci.pivots.is_fully_nested())
+                npt.assert_allclose(
+                    tensor_ci.to_tensor_train().get_full_tensor(),
+                    train.get_full_tensor(),
+                    rtol=RTOL,
+                    atol=ATOL,
+                )
+
+    def test_samples_the_train_once_at_its_largest_entry(self):
+        """The largest entry of the rational tensor, F(0, 0, 0, 0, 0) = 1."""
+        full = dense(rational, RATIONAL_DIMS)
+        train = tensor_train.tt_svd(full, error=1e-12)
+
+        tensor_ci = tci_form.TensorCI.from_tensor_train(train)
+
+        self.assertEqual(tensor_ci.box.n_evals, 1)
+        self.assertAlmostEqual(tensor_ci.box.max_modulus, np.abs(full).max(), 12)
+
+    def test_holds_the_rank_of_the_tensor_at_each_bond(self):
+        """Adding a train to itself doubles its bond dimensions, not its ranks."""
+        train = tensor_train.rand([2, 3, 2, 3, 2, 3], ranks=3, seed=1)
+        doubled = train + train
+        self.assertEqual(doubled.bonds, [1, 6, 6, 6, 6, 6, 1])
+
+        tensor_ci = tci_form.TensorCI.from_tensor_train(doubled)
+
+        self.assertEqual(tensor_ci.pivots.ranks, [1, 2, 3, 3, 3, 3, 1])
+
+    def test_finds_the_ranks_that_tci_finds_by_sampling(self):
+        train = tensor_train.rand([3, 4, 3, 4, 3], ranks=4, seed=7)
+
+        canonical = tci_form.TensorCI.from_tensor_train(train)
+        sampled = tci.tci(
+            black_box.tt_as_black_box(train), (3, 4, 3, 4, 3), [[0] * 5], 1e-12
+        )
+
+        self.assertEqual(canonical.pivots.ranks, sampled.pivots.ranks)
+
+    def test_a_train_from_tt_svd_recompresses_like_an_interpolation(self):
+        """The ranks match a recompression of the tci result in test_sweeps."""
+        train = tensor_train.tt_svd(dense(rational, RATIONAL_DIMS), error=1e-12)
+        tensor_ci = tci_form.TensorCI.from_tensor_train(train)
+
+        sweeps.recompress(tensor_ci, 1e-4)
+
+        self.assertEqual(tensor_ci.pivots.ranks, [1, 5, 5, 5, 5, 1])
+        self.assertTrue(tensor_ci.pivots.is_fully_nested())
+
+    def test_rejects_a_zero_train(self):
+        """A zero last core leaves every partial product before it nonzero."""
+        zero_last = tensor_train.rand([2, 3, 2], ranks=2, seed=0)
+        zero_last.cores[-1] = np.zeros_like(zero_last.cores[-1])
+        for name, train in {
+            "zero cores": tensor_train.zeros([2, 3, 2]),
+            "zero last core": zero_last,
+        }.items():
+            with self.subTest(train=name):
+                with self.assertRaises(ValueError):
+                    tci_form.TensorCI.from_tensor_train(train)
+
+    def test_rejects_a_tensor_train_matrix(self):
+        train = tensor_train.rand([(2, 2)] * 3, ranks=2, seed=0)
+        with self.assertRaises(tensor_train.WrongTTType):
+            tci_form.TensorCI.from_tensor_train(train)
 
 
 if __name__ == "__main__":
