@@ -273,16 +273,14 @@ not call `setup_logging`; use `pytest --log-cli-level=DEBUG` instead.
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-development setup, coding conventions and pull request workflow.
+development setup, coding conventions and merge request workflow.
 
 ## Maintainers
 
 TTNumPy is developed at Cloud Quantum Technologies and maintained by:
 
-- **Oleg Tatarkin** ([@mvanza](https://gitverse.ru/mvanza)) — research and
-  development, maintainer
-- **Sergey Usmanov** ([@susmanov](https://gitverse.ru/susmanov)) — scientific
-  lead: technical direction and code review
+- **Oleg Tatarkin** — research and development, maintainer
+- **Sergey Usmanov** — scientific lead: technical direction and code review
 
 ## License
 

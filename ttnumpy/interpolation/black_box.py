@@ -90,7 +90,7 @@ class BlackBox:
                 finite.
 
         Returns:
-            np.ndarray: Matrix of shape ``(len(rows), len(columns))`` whose
+            numpy.ndarray: Matrix of shape ``(len(rows), len(columns))`` whose
             entry ``[r, c]`` is the value at ``rows[r] + columns[c]``.
         """
         return np.array([[self(row + column) for column in columns] for row in rows])
