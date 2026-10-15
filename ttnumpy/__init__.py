@@ -3,6 +3,8 @@
 
 """Public tensor-train API for TTNumPy."""
 
+__version__ = "0.2.0"
+
 from . import interpolation, solvers, tensor_train, utils
 from .interpolation.black_box import BlackBox
 from .interpolation.sweeps import recompress
