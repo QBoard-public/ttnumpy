@@ -1,0 +1,120 @@
+---
+stages:
+  - analyze
+  - build
+  - verify
+  - benchmark
+
+variables:
+  PIP_INDEX_URL: https://mirror.qboard.tech/repository/pypi/simple
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+
+# A new commit cancels only interruptible jobs, see workflow:auto_cancel
+default:
+  interruptible: true
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"
+    - if: $CI_COMMIT_TAG
+
+.python:
+  image: python:3.10-bookworm
+  cache:
+    key:
+      files:
+        - pyproject.toml
+      prefix: pip
+    paths:
+      - .cache/pip
+  tags: [docker]
+
+######################################################################
+# Analyze Jobs
+######################################################################
+
+semgrep:
+  image: cr-mirror-rqc.qboard.tech/semgrep/semgrep:1.172.0
+  script:
+    - semgrep ci --config=auto --force-color --verbose
+      --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+  stage: analyze
+  tags: [docker]
+
+######################################################################
+# Build Jobs
+######################################################################
+
+build:
+  extends: .python
+  script:
+    - python3 -m pip install -e '.[dev]'
+    - python3 -c 'import ttnumpy'
+    - python3 -m sphinx -b html -W -d /tmp/doctrees docs docs/_build/html
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - docs/_build/html/
+  stage: build
+
+######################################################################
+# Verify Jobs
+######################################################################
+
+code_check:
+  extends: .python
+  script:
+    - python3 -m pip install -e '.[dev]'
+    - black . --check
+    - pylint $(git ls-files '*.py') --recursive y --max-line-length 160 --fail-under 9 -d invalid-name
+  stage: verify
+
+run_tests:
+  extends: .python
+  coverage: /^TOTAL.*\s(\d+\%)$/
+  script:
+    - python3 -m pip install -e '.[dev]'
+    - pytest --cov --cov-report=term --cov-report=xml:coverage.xml
+      --junitxml=report.xml -o junit_family=xunit2
+  artifacts:
+    expire_in: 1 week
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      junit: report.xml
+    when: always
+  stage: verify
+
+######################################################################
+# Benchmark Jobs
+######################################################################
+
+# informational: a slow or failing backend must not mark main red
+# BENCHMARK_SIZES can be overridden when running a pipeline manually
+benchmarks:
+  extends: .python
+  allow_failure: true
+  before_script:
+    - sed -i "s|deb.debian.org|${QBRD_MIRROR_HOST:-mirror.qboard.tech}/repository|"
+      /etc/apt/sources.list.d/debian.sources
+    - apt-get update
+    - apt-get install -y --no-install-recommends libopenblas-dev liblapack-dev
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"
+  script:
+    - python3 -m pip install -e '.[benchmark]'
+    - python3 -m benchmarks.poisson --sizes ${BENCHMARK_SIZES} --output-dir benchmark-results
+  timeout: 4 hours
+  variables:
+    BENCHMARK_SIZES: "7 8 9 10"
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - benchmark-results/
+    when: always
+  stage: benchmark
