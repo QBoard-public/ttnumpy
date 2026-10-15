@@ -21,8 +21,8 @@ Sites are numbered from 0 and site indices run ``0 .. d-1``, where the paper
 counts both from 1. Indices are positions rather than values. ``T_s`` is the
 paper's ``T_{s+1}``, and ``P_b`` is its ``P_b``.
 
-:meth:`TensorCI.from_tensor_train` brings any tensor train into this form
-without sampling it.
+:meth:`TensorCI.from_tensor_train <ttnumpy.TensorCI.from_tensor_train>` brings
+any tensor train into this form without sampling it.
 
 Reference:
     Y. Núñez Fernández et al., Learning tensor networks with tensor cross

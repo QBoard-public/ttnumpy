@@ -24,8 +24,8 @@ from ttnumpy import tensor_train
 #: One index per tensor axis, addressing a single element.
 Configuration = Sequence[int]
 
-#: Shape of the function TCI samples: one configuration in, the value there
-#: out.
+#: Shape of the function TCI samples, which takes one configuration and
+#: returns the value there.
 BlackBoxFunction = Callable[[Tuple[int, ...]], complex]
 
 

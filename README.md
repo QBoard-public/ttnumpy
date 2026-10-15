@@ -29,6 +29,10 @@ Documentation: <https://qboard.gitverse.site/ttnumpy/>
   form, which turns a grid of $2^n$ points into $n$ cores of mode size 2.
 - **Linear solvers.** ALS, MALS and AMEn for $Ax = b$ in TT format, sharing
   environments, local solvers and stopping criteria.
+- **Tensor cross interpolation.** `tci` builds a tensor train from a function
+  of indices, evaluating only a small part of the tensor. `add_global_pivots`
+  adds configurations the interpolation must cover. `recompress` lowers its
+  ranks.
 
 ## Installation
 
@@ -72,7 +76,8 @@ python -c "import ttnumpy as tt; print(tt.eye([2, 2]))"
 
 ## Quick start
 
-Build a tensor train, combine trains, and solve a linear system in TT format.
+Build a tensor train, combine trains, interpolate a function and solve a
+linear system in TT format.
 
 ```python
 import numpy as np
@@ -89,6 +94,13 @@ right = tt.rand([2, 3, 4], ranks=3, seed=2)
 combined = left + right                  # ranks add: [1, 6, 6, 1]
 rounded = combined.truncate()            # [1, 2, 4, 1]
 scaled = 0.5 * left
+
+# interpolate a function of 10 variables on 16**10 grid points
+nodes = np.linspace(0.0, 1.0, 16)
+f = lambda indices: 1.0 / (1.0 + sum(nodes[i] ** 2 for i in indices))
+interpolation = tt.tci(f, [16] * 10, initial_pivots=[[0] * 10])
+print(interpolation.to_tensor_train().bonds)   # [1, 6, 7, 7, 7, 8, 7, 7, 7, 6, 1]
+print(interpolation.box.n_evals)               # 127856 values of f
 
 # solve A x = b with the rank-adaptive AMEn solver
 A = tt.eye([2, 2, 2])                    # TTM operator
@@ -107,8 +119,8 @@ error of what they discard.
 
 The documentation is published at
 **<https://qboard.gitverse.site/ttnumpy/>**: a user guide that builds up tensor
-networks, the tensor train format and the variational solvers from the
-beginning, plus a full API reference.
+networks, the tensor train format, the variational solvers and tensor cross
+interpolation from the beginning, plus a full API reference.
 
 The Sphinx sources live in `docs/`, so the same pages can be built locally:
 

@@ -136,9 +136,8 @@ Large tensor trains are built by other routes:
   :ref:`tt-arithmetic` and rounding as you go.
 - **As the solution of an equation**, which is what the solvers in
   :doc:`linear_systems` do — they never form the full array at any point.
-- **By cross approximation**, which samples a black-box function at
-  adaptively chosen entries. This is not yet implemented in
-  ``TTNumPy``.
+- **By cross interpolation**, which samples a black-box function at
+  adaptively chosen entries, the subject of :doc:`cross_interpolation`.
 
 Once a train exists, by whatever route, its ranks can be reduced again
 without ever expanding it. That is the subject of the next chapter.

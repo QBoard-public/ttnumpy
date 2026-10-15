@@ -27,6 +27,10 @@ other runtime dependencies.
   mode size 2.
 - **Linear solvers.** ALS, MALS and AMEn for :math:`A x = b` in TT format,
   sharing environments, local solvers and stopping criteria.
+- **Tensor cross interpolation.** ``tci`` builds a tensor train from a
+  function of indices, evaluating only a small part of the tensor.
+  ``add_global_pivots`` adds configurations the interpolation must cover.
+  ``recompress`` lowers its ranks.
 - **Benchmarks.** A runner that measures the TT solvers against SciPy CG,
   PyAMG and PETSc on the Poisson equation.
 
