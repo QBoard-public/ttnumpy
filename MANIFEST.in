@@ -1,0 +1,9 @@
+include CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md
+include conftest.py pytest.ini
+graft tests
+graft benchmarks
+graft examples
+graft docs
+prune docs/_build
+graft branding
+global-exclude *.py[cod] __pycache__ .DS_Store

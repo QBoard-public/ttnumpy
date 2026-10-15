@@ -117,8 +117,9 @@ pytest
 ```
 
 New behaviour should arrive with tests, and a bug fix should come with a test
-that fails without it. Tests live alongside the code they cover, in a `test`
-directory inside each package.
+that fails without it. Tests live in `tests/` at the repository root, outside
+the package, so they are not installed with it. The benchmark runner keeps its
+own tests in `benchmarks/test`.
 
 Seed anything random. The suite compares against exact expectations, so an
 unseeded draw turns a real failure into an unreproducible one.
