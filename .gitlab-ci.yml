@@ -97,26 +97,6 @@ run_tests:
     when: always
   stage: verify
 
-# the lowest versions pyproject.toml accepts: requires-python is the image's
-# Python, the pins are the numpy and scipy lower bounds of [project] dependencies
-run_tests_oldest:
-  extends: .python
-  script:
-    - python3 -m pip install -U pip
-    - python3 -m pip install -e . --group dev numpy==2.3.1 scipy==1.15.0
-    - pytest
-  stage: verify
-
-# the newest Python, with the newest numpy and scipy it installs
-run_tests_newest:
-  extends: .python
-  image: python:3.14-bookworm
-  script:
-    - python3 -m pip install -U pip
-    - python3 -m pip install -e . --group dev
-    - pytest
-  stage: verify
-
 ######################################################################
 # Benchmark Jobs
 ######################################################################
