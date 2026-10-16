@@ -21,7 +21,7 @@ Publicly disclosing a vulnerability makes it easier for malicious attackers to e
 
 Please report security vulnerabilities using one of the following methods:
 
-1. **Email (Preferred):** Send an email to `security@qboard.tech`.
+1. **Email (Preferred):** Send an email to `info@qboard.tech`.
 2. **GitLab Confidential Issue** (requires an account on this GitLab instance):
    - Go to the "Issues" tab of this repository, click **New issue.**
    - Check the box labeled **This issue is confidential**.
