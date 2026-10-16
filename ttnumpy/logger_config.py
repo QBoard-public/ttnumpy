@@ -137,35 +137,6 @@ class LevelFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def _level_names_mapping() -> Dict[str, int]:
-    """
-    Return the level-name to level-number mapping.
-
-    ``logging.getLevelNamesMapping`` is the supported reverse lookup, but it
-    only exists on Python 3.11+; the explicit table covers the 3.10 floor this
-    package still declares. ``logging.getLevelName`` is deliberately not used:
-    its ``str -> int`` direction is deprecated.
-
-    Returns:
-        Dict[str, int]: Level names mapped to their numeric levels.
-    """
-    getter = getattr(logging, "getLevelNamesMapping", None)
-    if getter is not None:
-        return getter()
-    # FATAL and WARN are aliases of CRITICAL and WARNING; spelling them out
-    # here avoids referencing the deprecated logging.FATAL / logging.WARN.
-    return {
-        "CRITICAL": logging.CRITICAL,
-        "FATAL": logging.CRITICAL,
-        "ERROR": logging.ERROR,
-        "WARNING": logging.WARNING,
-        "WARN": logging.WARNING,
-        "INFO": logging.INFO,
-        "DEBUG": logging.DEBUG,
-        "NOTSET": logging.NOTSET,
-    }
-
-
 def resolve_level(level: LevelLike = None) -> int:
     """
     Translate the accepted level spellings into a ``logging`` level number.
@@ -206,7 +177,7 @@ def resolve_level(level: LevelLike = None) -> int:
     if name.isdigit():
         return resolve_level(int(name))
 
-    resolved = _level_names_mapping().get(name)
+    resolved = logging.getLevelNamesMapping().get(name)
     if resolved is None:
         raise ValueError(f"Unknown log level name: {level!r}")
     return resolved

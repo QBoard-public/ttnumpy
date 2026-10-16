@@ -35,7 +35,7 @@ Before contributing to this project you should see [README](README.md).
 
 ## Development Setup
 
-TTNumPy requires Python 3.10 or newer. Install the editable package with the
+TTNumPy requires Python 3.11 or newer. Install the editable package with the
 developer extras, which bring in pytest, Black, pylint and the documentation
 toolchain:
 

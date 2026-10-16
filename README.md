@@ -36,7 +36,7 @@ Documentation: <https://qboard.gitverse.site/ttnumpy/>
 
 ## Installation
 
-TTNumPy requires Python 3.10 or newer. Its only runtime dependencies are
+TTNumPy requires Python 3.11 or newer. Its only runtime dependencies are
 NumPy and SciPy .
 
 ```bash

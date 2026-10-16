@@ -1,7 +1,7 @@
 Installation
 ============
 
-TTNumPy requires Python 3.10 or newer. Its only runtime dependencies are
+TTNumPy requires Python 3.11 or newer. Its only runtime dependencies are
 NumPy and SciPy.
 
 Install the package and its runtime dependencies from the project root:
