@@ -9,6 +9,11 @@ variables:
   PIP_INDEX_URL: https://mirror.qboard.tech/repository/pypi/simple
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+  # one BLAS thread: numpy and scipy each load their own OpenBLAS, and on the
+  # runner's 4 CPUs four threads per library made the many small matrix
+  # operations of the test suite an order of magnitude slower
+  OPENBLAS_NUM_THREADS: "1"
+  OMP_NUM_THREADS: "1"
 
 # A new commit cancels only interruptible jobs, see workflow:auto_cancel
 default:
@@ -32,25 +37,6 @@ workflow:
     paths:
       - .cache/pip
   tags: [docker]
-
-# TODO: remove once the speed difference between the Python 3.11 and 3.14 test
-# jobs is explained. Prints the runner, its CPU model and CPU limit, the Python,
-# NumPy and SciPy versions, the BLAS libraries with their thread counts, then
-# times three BLAS-heavy tests with the default threads and with one thread.
-.blas_diagnostics: &blas_diagnostics
-  - 'echo "runner=${CI_RUNNER_DESCRIPTION} id=${CI_RUNNER_ID} nproc=$(nproc) cpu.max=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo n/a)"'
-  - grep -m1 "model name" /proc/cpuinfo || true
-  - python3 -c "import sys, numpy, scipy; print('python', sys.version.split()[0], 'numpy', numpy.__version__, 'scipy', scipy.__version__)"
-  - python3 -m pip install threadpoolctl
-  - python3 -m threadpoolctl -i numpy scipy.linalg
-  - pytest -o addopts="" -q --durations=3 -W ignore::scipy.linalg.LinAlgWarning
-      tests/test_mals.py::TestMals::test_mals_solves_a_nonsymmetric_system_from_the_default_guess
-      tests/test_mals.py::TestMals::test_mals_on_a_system_past_double_precision
-      tests/test_tensor_train.py::TestTTMethods::test_qtt
-  - OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 pytest -o addopts="" -q --durations=3 -W ignore::scipy.linalg.LinAlgWarning
-      tests/test_mals.py::TestMals::test_mals_solves_a_nonsymmetric_system_from_the_default_guess
-      tests/test_mals.py::TestMals::test_mals_on_a_system_past_double_precision
-      tests/test_tensor_train.py::TestTTMethods::test_qtt
 
 ######################################################################
 # Analyze Jobs
@@ -99,7 +85,6 @@ run_tests:
   script:
     - python3 -m pip install -U pip
     - python3 -m pip install -e . --group dev
-    - *blas_diagnostics
     - pytest --cov --cov-report=term --cov-report=xml:coverage.xml
       --junitxml=report.xml -o junit_family=xunit2
   artifacts:
@@ -119,7 +104,6 @@ run_tests_oldest:
   script:
     - python3 -m pip install -U pip
     - python3 -m pip install -e . --group dev numpy==2.3.1 scipy==1.15.0
-    - *blas_diagnostics
     - pytest
   stage: verify
 
@@ -130,7 +114,6 @@ run_tests_newest:
   script:
     - python3 -m pip install -U pip
     - python3 -m pip install -e . --group dev
-    - *blas_diagnostics
     - pytest
   stage: verify
 
