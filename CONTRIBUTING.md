@@ -229,4 +229,4 @@ licensed under the same terms.
 ## Need Help?
 
 If you have questions about contributing, development, or the project
-workflow, please contact us at this email address: support@qboard.tech.
+workflow, please contact us at this email address: info@qboard.tech.

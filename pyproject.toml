@@ -43,7 +43,7 @@ maintainers = [
   { name = "Cloud Quantum Technologies Limited Liability Company", email = "info@qboard.tech" },
 ]
 dependencies = [
-  "numpy>=2.1.0",
+  "numpy>=2.3.1",
   "scipy>=1.15.0",
 ]
 
