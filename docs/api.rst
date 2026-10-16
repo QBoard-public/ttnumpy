@@ -2,14 +2,16 @@ API Reference
 =============
 
 Every public entry point, grouped by module. ``ttnumpy`` is the one
-most code needs: it re-exports the container, the constructors and the
-solvers, so ``import ttnumpy as tt`` reaches all of them.
+most code needs: it re-exports the container, the constructors, the
+solvers and tensor cross interpolation, so ``import ttnumpy as tt`` reaches
+all of them.
 
-Tensor trains and solvers
--------------------------
+Tensor trains, solvers and interpolation
+----------------------------------------
 
 The public surface: the :class:`~ttnumpy.TensorTrain` container, the
-constructors, the three linear solvers and the types they report with.
+constructors, the three linear solvers, tensor cross interpolation and the
+types they report with.
 
 .. automodule:: ttnumpy
    :members:
@@ -39,6 +41,33 @@ package — one module per method (``als``, ``mals``, ``amen``) over a shared
 stopping machinery — and are re-exported from ``ttnumpy`` above.
 Two-site and one-site local systems live in ``two_site`` and ``one_site``
 respectively.
+
+Interpolation internals
+-----------------------
+
+.. py:module:: ttnumpy.interpolation
+
+Tensor cross interpolation is implemented in the ``ttnumpy.interpolation``
+package. Its entry points, :func:`~ttnumpy.tci`,
+:func:`~ttnumpy.add_global_pivots`, :func:`~ttnumpy.recompress`,
+:class:`~ttnumpy.TensorCI`, :class:`~ttnumpy.TCIInfo` and
+:class:`~ttnumpy.BlackBox`, are re-exported from ``ttnumpy`` above. The
+modules below hold the rest: the sampler in ``black_box``, the pivot lists
+of the TCI form in ``tci_form``, the updates and sweeps in ``sweeps`` and
+the factorization that selects pivots in ``prrlu``. The ``tci`` module holds
+only the two drivers. :doc:`user_guide/cross_interpolation`
+describes the algorithm.
+
+.. automodule:: ttnumpy.interpolation.black_box
+   :exclude-members: BlackBox
+
+.. automodule:: ttnumpy.interpolation.tci_form
+   :exclude-members: TensorCI
+
+.. automodule:: ttnumpy.interpolation.sweeps
+   :exclude-members: recompress
+
+.. automodule:: ttnumpy.interpolation.prrlu
 
 Low-level utilities
 -------------------

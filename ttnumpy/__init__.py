@@ -3,7 +3,11 @@
 
 """Public tensor-train API for TTNumPy."""
 
-from . import solvers, tensor_train, utils
+from . import interpolation, solvers, tensor_train, utils
+from .interpolation.black_box import BlackBox
+from .interpolation.sweeps import recompress
+from .interpolation.tci import TCIInfo, add_global_pivots, tci
+from .interpolation.tci_form import TensorCI
 from .solvers import (
     LocalSolver,
     SolverInfo,
@@ -45,5 +49,12 @@ __all__ = [
     "amen",
     "mals",
     "relative_residual",
+    "interpolation",
+    "BlackBox",
+    "TCIInfo",
+    "TensorCI",
+    "add_global_pivots",
+    "recompress",
+    "tci",
     "utils",
 ]
