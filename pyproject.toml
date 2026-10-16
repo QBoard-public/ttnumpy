@@ -10,11 +10,30 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
+keywords = [
+  "tensor train",
+  "TT",
+  "QTT",
+  "matrix product states",
+  "MPS",
+  "tensor networks",
+  "low-rank",
+  "numerical linear algebra",
+  "cross interpolation",
+  "TCI",
+  "ALS",
+  "MALS",
+  "AMEn",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
   "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 authors = [
   { name = "Cloud Quantum Technologies Limited Liability Company", email = "info@qboard.tech" },
