@@ -275,11 +275,11 @@ not call `setup_logging`; use `pytest --log-cli-level=DEBUG` instead.
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
 development setup, coding conventions and merge request workflow.
 
-## Maintainers
+## Authors
 
-TTNumPy is developed at Cloud Quantum Technologies and maintained by:
+TTNumPy is developed at Cloud Quantum Technologies by:
 
-- **Oleg Tatarkin** — research and development, maintainer
+- **Oleg Tatarkin** — research and development
 - **Sergey Usmanov** — scientific lead: technical direction and code review
 
 ## License
