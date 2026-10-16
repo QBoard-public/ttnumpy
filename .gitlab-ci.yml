@@ -23,7 +23,7 @@ workflow:
     - if: $CI_COMMIT_TAG
 
 .python:
-  image: python:3.10-bookworm
+  image: python:3.11-bookworm
   cache:
     key:
       files:
@@ -51,7 +51,8 @@ semgrep:
 build:
   extends: .python
   script:
-    - python3 -m pip install -e '.[dev]'
+    - python3 -m pip install -U pip
+    - python3 -m pip install -e . --group dev
     - python3 -c 'import ttnumpy'
     - python3 -m sphinx -b html -W -d /tmp/doctrees docs docs/_build/html
   artifacts:
@@ -67,7 +68,8 @@ build:
 code_check:
   extends: .python
   script:
-    - python3 -m pip install -e '.[dev]'
+    - python3 -m pip install -U pip
+    - python3 -m pip install -e . --group dev
     - black . --check
     - pylint $(git ls-files '*.py') --recursive y --max-line-length 160 --fail-under 9 -d invalid-name
   stage: verify
@@ -76,7 +78,8 @@ run_tests:
   extends: .python
   coverage: /^TOTAL.*\s(\d+\%)$/
   script:
-    - python3 -m pip install -e '.[dev]'
+    - python3 -m pip install -U pip
+    - python3 -m pip install -e . --group dev
     - pytest --cov --cov-report=term --cov-report=xml:coverage.xml
       --junitxml=report.xml -o junit_family=xunit2
   artifacts:
@@ -106,7 +109,8 @@ benchmarks:
   rules:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"
   script:
-    - python3 -m pip install -e '.[benchmark]'
+    - python3 -m pip install -U pip
+    - python3 -m pip install -e . --group benchmark
     - python3 -m benchmarks.poisson --sizes ${BENCHMARK_SIZES} --output-dir benchmark-results
   timeout: 4 hours
   variables:

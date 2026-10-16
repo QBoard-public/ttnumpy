@@ -36,11 +36,12 @@ Before contributing to this project you should see [README](README.md).
 ## Development Setup
 
 TTNumPy requires Python 3.11 or newer. Install the editable package with the
-developer extras, which bring in pytest, Black, pylint and the documentation
-toolchain:
+`dev` dependency group, which brings in pytest, Black, pylint and the
+documentation toolchain. Dependency groups need pip 25.1 or newer:
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -U pip
+python -m pip install -e . --group dev
 ```
 
 Verify the installation:

@@ -43,22 +43,24 @@ NumPy and SciPy .
 python -m pip install .
 ```
 
-For development work, install the editable package with the developer extras:
+For development work, install the editable package with the `dev` dependency
+group. Dependency groups need pip 25.1 or newer:
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -U pip
+python -m pip install -e . --group dev
 ```
 
-The `docs` extra installs only the documentation toolchain:
+The `docs` group installs only the documentation toolchain:
 
 ```bash
-python -m pip install -e '.[docs]'
+python -m pip install -e . --group docs
 ```
 
-The `benchmark` extra installs all needed packages for benchmarking:
+The `benchmark` group installs all needed packages for benchmarking:
 
 ```bash
-python -m pip install -e '.[benchmark]'
+python -m pip install -e . --group benchmark
 ```
 This adds PyAMG and PETSc on top of the runtime requirements. PETSc has no
 prebuilt wheels and is compiled from source, so it needs BLAS and LAPACK
@@ -125,7 +127,7 @@ interpolation from the beginning, plus a full API reference.
 The Sphinx sources live in `docs/`, so the same pages can be built locally:
 
 ```bash
-python -m pip install -e '.[docs]'
+python -m pip install -e . --group docs
 python -m sphinx -b html docs docs/_build/html
 ```
 
