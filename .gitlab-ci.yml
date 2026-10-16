@@ -41,7 +41,6 @@ semgrep:
   image: cr-mirror-rqc.qboard.tech/semgrep/semgrep:1.172.0
   script:
     - semgrep ci --config=auto --force-color --verbose
-      --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
   stage: analyze
   tags: [docker]
 

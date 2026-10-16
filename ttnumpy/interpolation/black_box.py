@@ -24,8 +24,8 @@ from ttnumpy import tensor_train
 #: One index per tensor axis, addressing a single element.
 Configuration = Sequence[int]
 
-#: Shape of the function TCI samples: one configuration in, the value there
-#: out.
+#: Shape of the function TCI samples, which takes one configuration and
+#: returns the value there.
 BlackBoxFunction = Callable[[Tuple[int, ...]], complex]
 
 
@@ -90,7 +90,7 @@ class BlackBox:
                 finite.
 
         Returns:
-            np.ndarray: Matrix of shape ``(len(rows), len(columns))`` whose
+            numpy.ndarray: Matrix of shape ``(len(rows), len(columns))`` whose
             entry ``[r, c]`` is the value at ``rows[r] + columns[c]``.
         """
         return np.array([[self(row + column) for column in columns] for row in rows])
