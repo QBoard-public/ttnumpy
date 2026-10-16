@@ -152,6 +152,36 @@ See :doc:`user_guide/linear_systems` for how the solvers work, how to choose
 between them, and :mod:`ttnumpy.solvers` for the full list of
 options.
 
+Interpolating a function
+------------------------
+A function that can be evaluated entry by entry, but whose full tensor is too
+large to store, reaches the tensor-train format through tensor cross
+interpolation. :func:`~ttnumpy.tci` calls the function with one index per
+variable and evaluates it only at the entries it chooses.
+
+.. code-block:: python
+
+   import numpy as np
+   from ttnumpy import tci
+
+   nodes = np.linspace(0.0, 1.0, 16)
+
+   def f(indices):
+       return 1.0 / (1.0 + sum(nodes[i] ** 2 for i in indices))
+
+   # 10 variables on 16 nodes each: 16**10 entries
+   tensor_ci = tci(f, [16] * 10, initial_pivots=[[0] * 10], error_threshold=1e-8)
+
+   train = tensor_ci.to_tensor_train()   # an ordinary TensorTrain
+   print(train.bonds)                    # [1, 7, 7, 8, 8, 8, 8, 8, 7, 7, 1]
+   print(tensor_ci.box.n_evals)          # 163912
+
+The function receives grid indices, not coordinates: ``nodes`` maps them to
+points. The initial pivot is a configuration where the function is nonzero.
+:func:`~ttnumpy.add_global_pivots` adds configurations the interpolation must
+cover. :func:`~ttnumpy.recompress` lowers its ranks. See
+:doc:`user_guide/cross_interpolation` for how it works and where it can fail.
+
 Next step
 ----------------------
 That is a brief introduction to the tools `TTNumPy` makes available. For

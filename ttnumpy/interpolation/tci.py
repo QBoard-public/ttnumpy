@@ -238,7 +238,7 @@ def tci(
     Returns:
         TensorCI: The interpolation, or a tuple (TensorCI, TCIInfo) if
         return_info is True. It holds the sampler with every value sampled,
-        and its :meth:`~ttnumpy.interpolation.tci_form.TensorCI.to_tensor_train`
+        and its :meth:`~ttnumpy.TensorCI.to_tensor_train`
         builds a :class:`~ttnumpy.tensor_train.TensorTrain` through the same
         cache.
 

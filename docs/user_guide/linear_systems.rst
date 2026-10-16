@@ -333,6 +333,88 @@ proceeds.
 ``info.max_bonds`` records the largest bond dimension after each sweep, which
 is the quickest way to see the rank adaptation at work.
 
+.. _solver-cost:
+
+Cost
+----
+
+The cost of a solver depends on its arguments. The table lists its four
+main parts for each solver, with the arguments that switch them on. Time is
+per step or per sweep, as each row states. Memory is what the part needs on
+top of the trains :math:`A`, :math:`x` and :math:`b`.
+
+The costs are given for :math:`d` sites of mode size :math:`n`, solution
+bond dimension :math:`r`, operator bond dimension :math:`r_A`,
+right-hand-side bond dimension :math:`r_b`, AMEn's ``kickrank`` :math:`k`
+and :math:`m` Krylov iterations per local solve. For AMEn, :math:`r`
+includes the enrichment. A step solves the local system at one site (ALS
+and AMEn) or on a pair of neighbouring sites (MALS). The local system has
+:math:`N = r^2 n` unknowns at one site and :math:`N = r^2 n^2` on a pair. A
+sweep makes about :math:`2d` steps.
+
++--------------------------------+------------------------+------------------+------------------------+------------------+------------------------+------------------+
+| Case                           | ALS                                       | MALS                                      | AMEn                                      |
+|                                +------------------------+------------------+------------------------+------------------+------------------------+------------------+
+|                                | Time                   | Memory           | Time                   | Memory           | Time                   | Memory           |
++================================+========================+==================+========================+==================+========================+==================+
+| Explicit local solve, per      | :math:`O(r^6 n^3 + r^4 | :math:`O(r^4     | :math:`O(r^6 n^6 + r^4 | :math:`O(r^4     | as ALS                 | as ALS           |
+| step. Used while :math:`N \le` | n^2 r_A + r^2 n^2      | n^2)`            | n^4 r_A + r^2 n^4      | n^4)`            |                        |                  |
+| ``direct_solve_size`` and      | r_A^2)`                |                  | r_A^2)`                |                  |                        |                  |
+| always with                    |                        |                  |                        |                  |                        |                  |
+| ``local_solver="direct"``.     |                        |                  |                        |                  |                        |                  |
++--------------------------------+------------------------+------------------+------------------------+------------------+------------------------+------------------+
+| Matrix-free local solve with   | :math:`O(m (r^3 n r_A  | :math:`O(r^2 n   | :math:`O(m (r^3 n^2    | :math:`O(r^2 n^2 | as ALS                 | as ALS           |
+| :math:`m` Krylov iterations,   | + r^2 n^2 r_A^2))`     | r_A)`            | r_A + r^2 n^3 r_A^2))` | r_A)`            |                        |                  |
+| per step. Used above           |                        |                  |                        |                  |                        |                  |
+| ``direct_solve_size`` unless   |                        |                  |                        |                  |                        |                  |
+| ``local_solver="direct"``.     |                        |                  |                        |                  |                        |                  |
++--------------------------------+------------------------+------------------+------------------------+------------------+------------------------+------------------+
+| Environment update, per step   | :math:`O(r^3 n r_A +   | :math:`O(d (r^2  | :math:`O(r^3 n r_A +   | as ALS           | as ALS, plus           | as ALS, plus     |
+|                                | r^2 n^2 r_A^2 + r r_b  | r_A + r r_b))`   | r^2 n^2 r_A^2 + r r_b  |                  | :math:`O(k (r^2 n r_A  | :math:`O(d k (r  |
+|                                | n (r + r_b))`          | for all sites    | n (r n + r_b))`        |                  | + r n^2 r_A^2 + k r n  | r_A + r_b))`     |
+|                                |                        |                  |                        |                  | r_A + r_b n (k +       |                  |
+|                                |                        |                  |                        |                  | r_b)))` for the        |                  |
+|                                |                        |                  |                        |                  | residual train         |                  |
++--------------------------------+------------------------+------------------+------------------------+------------------+------------------------+------------------+
+| Residual check, per sweep.     | :math:`O(d n (n r^2    | :math:`O(d n (r  | as ALS                 | as ALS           | as ALS                 | as ALS           |
+| Made when ``residual_tol`` is  | r_A^2 + (r r_A +       | r_A + r_b)^2)`   |                        |                  |                        |                  |
+| set, when                      | r_b)^3))`              |                  |                        |                  |                        |                  |
+| ``return_info=True``, or when  |                        |                  |                        |                  |                        |                  |
+| a ``stagnation_factor`` is     |                        |                  |                        |                  |                        |                  |
+| given with ``max_sweeps``      |                        |                  |                        |                  |                        |                  |
+| above 1.                       |                        |                  |                        |                  |                        |                  |
++--------------------------------+------------------------+------------------+------------------------+------------------+------------------------+------------------+
+
+The environments are partial contractions of :math:`x^\dagger A x` and
+:math:`x^\dagger b`: one over the sites left of the current step, one over
+the sites right of it. A local system is built from them and the cores at
+the step, without touching the rest of the train. After each step the
+solver extends the environment behind it by the core it has just solved.
+That extension is the environment row of the table. AMEn keeps such
+environments for its residual train as well.
+
+Smaller parts of the cost:
+
+- GMRES, the Krylov method used without ``symmetric=True``, keeps up to 21
+  vectors of length :math:`N`. MINRES, used with ``symmetric=True``, keeps a
+  few.
+- :math:`m` grows as the Krylov tolerance tightens. The tolerance is
+  ``local_rtol`` if given, otherwise :math:`0.1` ``residual_tol`` if that is
+  given, otherwise :math:`10^{-8}`. A solve that misses it runs again with
+  a tighter tolerance, up to 4 runs in all. If the last run misses too,
+  ``allow_dense_fallback=True`` redoes the solve on the explicit matrix, at
+  the cost of the explicit row.
+- Truncating a solved core is an SVD: :math:`O(r^3 n^3)` for MALS and
+  :math:`O(r^3 n)` for AMEn. ALS does not truncate. With ``residual_tol``
+  set, choosing the rank also applies the local operator to up to
+  :math:`r n` rank-one terms for MALS or :math:`r` for AMEn.
+- Updating AMEn's residual train and enriching the solved core take
+  :math:`O(k (r^2 n r_A + r n^2 r_A^2 + k r n r_A))` per step.
+
+The Cost sections of the module docstrings in ``ttnumpy/solvers/als.py``,
+``mals.py`` and ``amen.py`` list every term. They write ``n`` for the number
+of sites, ``d`` for the mode size and ``R`` for the operator bond dimension.
+
 Choosing a solver
 -----------------
 
