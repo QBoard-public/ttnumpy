@@ -1,4 +1,4 @@
-include CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md
+include CITATION.cff CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md
 include conftest.py pytest.ini
 graft tests
 graft benchmarks

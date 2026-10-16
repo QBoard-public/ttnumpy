@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use TTNumPy in your research, please cite it as below."
+type: software
+title: "TTNumPy: tensor-train toolbox for numerical linear algebra"
+version: 0.2.0
+license: AGPL-3.0-or-later
+# TODO: switch repository-code and url to GitHub once the mirror exists
+repository-code: "https://git.qboard.tech/qboard/rnd/ttnumpy"
+url: "https://qboard.gitverse.site/ttnumpy/"
+abstract: >-
+  TTNumPy is a Python library for numerical linear algebra in the
+  tensor-train format: TT and TTM containers, TT-SVD and rounding,
+  quantized tensor trains, the ALS, MALS and AMEn linear solvers and
+  tensor cross interpolation.
+keywords:
+  - tensor train
+  - TT
+  - QTT
+  - matrix product states
+  - MPS
+  - tensor networks
+  - low-rank
+  - numerical linear algebra
+  - cross interpolation
+  - TCI
+  - ALS
+  - MALS
+  - AMEn
+authors:
+  - family-names: Tatarkin
+    given-names: Oleg
+    orcid: "https://orcid.org/0009-0007-3988-8528"
+  - family-names: Usmanov
+    given-names: Sergey
+    orcid: "https://orcid.org/0009-0007-9709-8217"
+    affiliation: "Cloud Quantum Technologies Limited Liability Company"
