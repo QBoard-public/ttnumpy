@@ -9,10 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import ttnumpy  # pylint: disable=wrong-import-position
+
 project = "TTNumPy"
 copyright = "2026, Cloud Quantum Technologies Limited Liability Company"
 author = "Oleg Tatarkin, Sergey Usmanov"
-release = "0.1.0"
+release = ttnumpy.__version__
 
 extensions = [
     "sphinx.ext.autodoc",
