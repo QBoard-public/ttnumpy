@@ -27,9 +27,9 @@ def log_test_boundaries(request: pytest.FixtureRequest):
     At DEBUG this interleaves with the library's own output, so it is clear
     which test produced which records:
 
-        [ttnumpy-test] conftest.py:31 DEBUG start ttnumpy/test/test_mals.py::test_tt_mals
+        [ttnumpy-test] conftest.py:31 DEBUG start tests/test_mals.py::test_tt_mals
         [ttnumpy]   tensor_train.py:153 DEBUG Tensor Train with rank 5 saved.
-        [ttnumpy-test] conftest.py:33 DEBUG end   ttnumpy/test/test_mals.py::test_tt_mals
+        [ttnumpy-test] conftest.py:33 DEBUG end   tests/test_mals.py::test_tt_mals
 
     Quiet on a normal run: these are DEBUG records, and without
     ``--log-cli-level`` nothing below WARNING is shown.

@@ -13,7 +13,7 @@ import runpy
 import unittest
 from pathlib import Path
 
-EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 class TestExamples(unittest.TestCase):

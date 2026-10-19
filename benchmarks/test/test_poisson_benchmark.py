@@ -12,7 +12,7 @@ and no solver runs.
 
 2) The execution layer runs for real at ``n=3``, an 8x8 grid on which every
 backend completes in milliseconds. ``pyamg`` and ``petsc4py`` are optional
-dependencies. CI installs ``.[dev]``, which omits both.
+dependencies. CI installs the ``dev`` dependency group, which omits both.
 """
 
 import dataclasses
@@ -780,7 +780,7 @@ def test_markdown_marks_a_backend_with_no_row_as_unavailable(tmp_path):
 def test_compare_runs_the_way_ci_does_without_the_optional_backends(monkeypatch):
     """The suite runs in CI's environment, without the optional backends.
 
-    CI installs ``.[dev]``, which omits pyamg and petsc4py. In that
+    CI installs the ``dev`` dependency group, which omits pyamg and petsc4py. In that
     environment petsc produces no result at all, and the cross-check skips
     entries that carry no solution.
     """

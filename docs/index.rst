@@ -59,3 +59,4 @@ algorithms in depth, and :doc:`api` documents every public entry point.
    user_guide
    examples
    api
+   changelog

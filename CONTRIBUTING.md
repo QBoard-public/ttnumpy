@@ -35,12 +35,13 @@ Before contributing to this project you should see [README](README.md).
 
 ## Development Setup
 
-TTNumPy requires Python 3.10 or newer. Install the editable package with the
-developer extras, which bring in pytest, Black, pylint and the documentation
-toolchain:
+TTNumPy requires Python 3.11 or newer. Install the editable package with the
+`dev` dependency group, which brings in pytest, Black, pylint and the
+documentation toolchain. Dependency groups need pip 25.1 or newer:
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -U pip
+python -m pip install -e . --group dev
 ```
 
 Verify the installation:
@@ -117,8 +118,9 @@ pytest
 ```
 
 New behaviour should arrive with tests, and a bug fix should come with a test
-that fails without it. Tests live alongside the code they cover, in a `test`
-directory inside each package.
+that fails without it. Tests live in `tests/` at the repository root, outside
+the package, so they are not installed with it. The benchmark runner keeps its
+own tests in `benchmarks/test`.
 
 Seed anything random. The suite compares against exact expectations, so an
 unseeded draw turns a real failure into an unreproducible one.
@@ -227,4 +229,4 @@ licensed under the same terms.
 ## Need Help?
 
 If you have questions about contributing, development, or the project
-workflow, please contact us at this email address: support@qboard.tech.
+workflow, please contact us at this email address: info@qboard.tech.
