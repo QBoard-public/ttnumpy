@@ -12,7 +12,7 @@ vulnerabilities and the process for reporting them.
 
 ## Reporting a Vulnerability
 
-**DO NOT open a public issue, merge request, or discussion for security vulnerabilities.**
+**DO NOT open a public GitHub or GitLab issue, pull request, merge request, or discussion for security vulnerabilities.**
 Publicly disclosing a vulnerability makes it easier for malicious attackers to exploit it before a fix is released.
 
 ---
@@ -22,8 +22,8 @@ Publicly disclosing a vulnerability makes it easier for malicious attackers to e
 Please report security vulnerabilities using one of the following methods:
 
 1. **Email (Preferred):** Send an email to `info@qboard.tech`.
-2. **GitLab Confidential Issue** (requires an account on this GitLab instance):
-   - Go to the "Issues" tab of this repository, click **New issue.**
+2. **GitLab Confidential Issue** (requires an account on git.qboard.tech):
+   - Go to the "Issues" tab of <https://git.qboard.tech/qboard/rnd/ttnumpy>, click **New issue.**
    - Check the box labeled **This issue is confidential**.
    - Click the **Create issue** button at the bottom.
 

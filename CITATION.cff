@@ -3,10 +3,10 @@ message: "If you use TTNumPy in your research, please cite it as below."
 type: software
 title: "TTNumPy: tensor-train toolbox for numerical linear algebra"
 version: 0.2.0
+date-released: 2026-11-02
 license: AGPL-3.0-or-later
-# TODO: switch repository-code and url to GitHub once the mirror exists
-repository-code: "https://git.qboard.tech/qboard/rnd/ttnumpy"
-url: "https://qboard.gitverse.site/ttnumpy/"
+repository-code: "https://github.com/QBoard-public/ttnumpy"
+url: "https://qboard-public.github.io/ttnumpy/"
 abstract: >-
   TTNumPy is a Python library for numerical linear algebra in the
   tensor-train format: TT and TTM containers, TT-SVD and rounding,

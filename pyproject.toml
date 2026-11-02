@@ -47,6 +47,13 @@ dependencies = [
   "scipy>=1.15.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/QBoard-public/ttnumpy"
+Documentation = "https://qboard-public.github.io/ttnumpy/"
+Issues = "https://github.com/QBoard-public/ttnumpy/issues"
+Changelog = "https://qboard-public.github.io/ttnumpy/changelog.html"
+Development = "https://git.qboard.tech/qboard/rnd/ttnumpy"
+
 [dependency-groups]
 docs = [
   "sphinx>=7.0.0",

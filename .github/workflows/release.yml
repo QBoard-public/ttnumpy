@@ -1,0 +1,171 @@
+---
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Check the tag and the release files
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          tag_re='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          [[ "$GITHUB_REF_NAME" =~ $tag_re ]] || fail "tag $GITHUB_REF_NAME is not of the form vX.Y.Z"
+          VERSION="${GITHUB_REF_NAME#v}"
+          grep -Fqx "__version__ = \"$VERSION\"" ttnumpy/__init__.py \
+            || fail "ttnumpy/__init__.py does not set __version__ = \"$VERSION\""
+          heading=$(grep -F -m1 "## [$VERSION] - " CHANGELOG.md || true)
+          date_re=' - [0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          [[ "$heading" =~ $date_re ]] \
+            || fail "CHANGELOG.md has no dated '## [$VERSION] - YYYY-MM-DD' heading"
+          grep -Fqx "version: $VERSION" CITATION.cff \
+            || fail "CITATION.cff does not say version: $VERSION"
+          grep -Eq '^date-released: [0-9]{4}-[0-9]{2}-[0-9]{2}$' CITATION.cff \
+            || fail "CITATION.cff has no date-released"
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install -U pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+
+      - name: Upload the distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/ttnumpy
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  # Installs ttnumpy from TestPyPI and its dependencies from PyPI, since
+  # TestPyPI copies of numpy and scipy are not the published ones.
+  check-testpypi:
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      # a fresh upload can take a few minutes to appear in the TestPyPI index
+      - name: Install the TestPyPI package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python -m pip install -U pip
+          python -m pip install "numpy>=2.3.1" "scipy>=1.15.0"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install --no-deps --index-url https://test.pypi.org/simple/ "ttnumpy==$VERSION"; then
+              break
+            fi
+            if [ "$attempt" = 10 ]; then
+              echo "::error::ttnumpy $VERSION did not appear on TestPyPI"
+              exit 1
+            fi
+            sleep 30
+          done
+
+      # -I keeps the checkout off sys.path, so the installed package is tested
+      - name: Run the examples against the installed package
+        run: |
+          python -I -c 'import os, ttnumpy; assert ttnumpy.__version__ == os.environ["GITHUB_REF_NAME"][1:]; assert "site-packages" in ttnumpy.__file__; print(ttnumpy.__version__, ttnumpy.__file__)'
+          for script in examples/*.py; do
+            echo "$script"
+            python -I "$script" > /dev/null
+          done
+
+  # A required reviewer on the pypi environment approves this job.
+  publish-pypi:
+    needs: check-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ttnumpy
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+
+  github-release:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v heading="## [$VERSION] - " \
+            'index($0, heading) == 1 {found = 1; next} /^## \[/ {found = 0} found' \
+            CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "TTNumPy $VERSION" --notes-file notes.md --verify-tag

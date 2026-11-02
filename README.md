@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="branding/logo/ttnumpy-logo.svg" alt="TTNumPy — tensor train toolbox by QBoard" width="440">
+  <img src="https://raw.githubusercontent.com/QBoard-public/ttnumpy/main/branding/logo/ttnumpy-logo.svg" alt="TTNumPy — tensor train toolbox by QBoard" width="440">
 </h1>
 
 **Tensor-train toolbox for numerical linear algebra.**
@@ -13,7 +13,11 @@ known in the physics literature as matrix product states and matrix product
 operators. It is written in Python on top of NumPy and SciPy and pulls in no
 other runtime dependencies.
 
-Documentation: <https://qboard.gitverse.site/ttnumpy/>
+Documentation: <https://qboard-public.github.io/ttnumpy/>
+
+Development: <https://git.qboard.tech/qboard/rnd/ttnumpy> (GitLab). The GitHub
+repository <https://github.com/QBoard-public/ttnumpy> and GitVerse 
+<https://gitverse.ru/qboard/ttnumpy> mirrors its `main` branch.
 
 ## Features
 
@@ -37,7 +41,13 @@ Documentation: <https://qboard.gitverse.site/ttnumpy/>
 ## Installation
 
 TTNumPy requires Python 3.11 or newer. Its only runtime dependencies are
-NumPy and SciPy .
+NumPy and SciPy. Install the latest release from PyPI:
+
+```bash
+python -m pip install ttnumpy
+```
+
+To install from a clone of the repository instead, run from its root:
 
 ```bash
 python -m pip install .
@@ -120,9 +130,9 @@ error of what they discard.
 ## Documentation
 
 The documentation is published at
-**<https://qboard.gitverse.site/ttnumpy/>**: a user guide that builds up tensor
-networks, the tensor train format, the variational solvers and tensor cross
-interpolation from the beginning, plus a full API reference.
+**<https://qboard-public.github.io/ttnumpy/>**: a user guide that builds up
+tensor networks, the tensor train format, the variational solvers and tensor
+cross interpolation from the beginning, plus a full API reference.
 
 The Sphinx sources live in `docs/`, so the same pages can be built locally:
 
@@ -170,6 +180,11 @@ solvers against classical sparse baselines on the Poisson equation
 $-\Delta u = f$ on the unit square, discretized with finite differences and
 solved on a $2^n \times 2^n$ grid.
 
+The benchmarks run in GitLab CI, not on GitHub. Every commit on `main` runs
+the suite at depths 7 to 10 ($128 \times 128$ to $1024 \times 1024$ grids).
+The pipeline keeps the Markdown and JSON reports as job artifacts for 30
+days.
+
 ### Running
 
 ```bash
@@ -209,6 +224,12 @@ The five rows are:
   dimension reached for the TT solvers, iteration count for the classical ones.
 
 ## Development
+
+Development happens in the GitLab repository
+<https://git.qboard.tech/qboard/rnd/ttnumpy>, where merge requests are opened.
+Its CI runs the tests, the linters, the documentation build and the
+benchmarks. Changes reach the GitHub repository through a mirror of `main`;
+the only workflow on GitHub publishes the documentation.
 
 The test suite runs with `pytest` from the repository root:
 
@@ -274,8 +295,10 @@ not call `setup_logging`; use `pytest --log-cli-level=DEBUG` instead.
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-development setup, coding conventions and merge request workflow.
+Contributions are welcome. Report bugs and ask questions in GitHub Issues:
+<https://github.com/QBoard-public/ttnumpy/issues>. See
+[CONTRIBUTING.md](https://github.com/QBoard-public/ttnumpy/blob/main/CONTRIBUTING.md)
+for the development setup, coding conventions and merge request workflow.
 
 ## Authors
 
@@ -287,4 +310,4 @@ TTNumPy is developed at Cloud Quantum Technologies by:
 ## License
 
 TTNumPy is distributed under the GNU Affero General Public License v3.0.
-See [LICENSE](LICENSE) for the full text.
+See [LICENSE](https://github.com/QBoard-public/ttnumpy/blob/main/LICENSE) for the full text.

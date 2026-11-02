@@ -5,7 +5,7 @@ All notable changes to TTNumPy are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0.0 a
 minor release may change the API.
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-02
 
 First release on PyPI. Changes are relative to 0.1.0, which was installed from
 the source repository.
