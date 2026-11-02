@@ -17,6 +17,13 @@ Every contribution helps improve the project and is greatly appreciated.
 
 Before contributing to this project you should see [README](README.md).
 
+Bugs, questions and feature requests go to GitHub Issues:
+<https://github.com/QBoard-public/ttnumpy/issues>. Development happens in the GitLab repository
+<https://git.qboard.tech/qboard/rnd/ttnumpy>, which the GitHub repository
+mirrors. Pull requests opened on GitHub cannot be merged there, so the
+maintainers apply accepted changes in GitLab, from where they reach GitHub
+through the mirror.
+
 ---
 
 ## Contents
@@ -229,4 +236,5 @@ licensed under the same terms.
 ## Need Help?
 
 If you have questions about contributing, development, or the project
-workflow, please contact us at this email address: info@qboard.tech.
+workflow, please open an issue at <https://github.com/QBoard-public/ttnumpy/issues> or write to
+info@qboard.tech.
