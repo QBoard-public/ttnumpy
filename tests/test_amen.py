@@ -3,6 +3,7 @@
 
 """Tests for the AMEn one-site solver and its residual/enrichment machinery."""
 
+import math
 import unittest
 from unittest import mock
 
@@ -202,7 +203,7 @@ class TestAmen(unittest.TestCase):
             self.assertEqual(site_core.shape[3], x.bonds[site + 1])
 
     def test_enrich_hard_cap_is_value_exact(self):
-        """max_rank drops only surplus enrichment directions (H3): the bond is
+        """max_rank drops only extra enrichment directions (H3): the bond is
         capped and the represented tensor is unchanged."""
         order = 5
 
@@ -383,6 +384,35 @@ class TestAmen(unittest.TestCase):
         self.assertLessEqual(max(solution.bonds), 2)
         for max_bond in info.max_bonds:
             self.assertLessEqual(max_bond, 2)
+
+    def test_amen_bonds_stay_within_the_full_rank_bound(self):
+        """No bond exceeds the product of the modes on either side of it."""
+        for modes, rank in (([2] * 13, 12), ([3, 2, 4, 2, 3], 6)):
+            with self.subTest(modes=modes):
+                operator = tensor_train.eye(modes)
+                rhs = tensor_train.rand(modes, ranks=rank, seed=0)
+
+                solution, info = amen(
+                    operator,
+                    rhs,
+                    residual_tol=1e-8,
+                    symmetric=True,
+                    return_info=True,
+                    seed=1,
+                )
+
+                for k, bond in enumerate(solution.bonds):
+                    self.assertLessEqual(
+                        bond, min(math.prod(modes[:k]), math.prod(modes[k:]))
+                    )
+                # these bonds are reduced after the last residual was measured;
+                # the reduction leaves that residual unchanged
+                npt.assert_allclose(
+                    relative_residual(operator, rhs, solution),
+                    info.residuals[-1],
+                    rtol=0,
+                    atol=1e-12,
+                )
 
     def test_amen_hard_cap_allows_convergence(self):
         """A hard cap at the solution's rank still converges: the enrichment is

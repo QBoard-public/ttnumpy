@@ -3,10 +3,15 @@
 
 """Module for utility functions on tensor trains."""
 
-from typing import List, Optional
+import logging
+from typing import List, Optional, Tuple
 
 import numpy as np
-from scipy.linalg import qr, rq, svd
+from scipy.linalg import LinAlgError, qr, rq, svd
+
+from ttnumpy.logger_config import PACKAGE_LOGGER_NAME
+
+logger = logging.getLogger(PACKAGE_LOGGER_NAME)
 
 
 def tensor_norm(tensor: np.ndarray) -> float:
@@ -123,6 +128,34 @@ def right_orthonormalize(
     return cores
 
 
+def _svd_with_fallback(
+    matrix: np.ndarray, core: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Thin SVD of an unfolding of core ``core``, with ``gesvd`` if ``gesdd`` fails.
+
+    Raises:
+        ValueError: If ``gesdd`` does not converge on a matrix with NaN or
+            infinite entries.
+    """
+    # without overwrite_a the matrix is still intact for the gesvd attempt
+    try:
+        return svd(matrix, full_matrices=False, check_finite=False)
+    except LinAlgError as error:
+        # NaN or inf entries can end in the same error; gesvd does not
+        # decompose them either
+        if not np.isfinite(matrix).all():
+            raise ValueError(f"Core {core} has NaN or infinite entries") from error
+        logger.warning(
+            "SVD of core %d (%d x %d unfolding) did not converge with LAPACK "
+            "gesdd; repeating it with gesvd",
+            core,
+            *matrix.shape,
+        )
+        return svd(
+            matrix, full_matrices=False, check_finite=False, lapack_driver="gesvd"
+        )
+
+
 def left_svd(
     cores: List[np.ndarray],
     error: float,
@@ -130,10 +163,18 @@ def left_svd(
 ) -> List[np.ndarray]:
     """Left svd truncation of tensor train cores.
 
+    Each unfolding is decomposed with LAPACK ``gesdd``. If ``gesdd`` does not
+    converge, the unfolding is decomposed again with ``gesvd`` and a warning is
+    logged.
+
     Args:
         cores: Tensor train cores.
         error: Truncation threshold.
         max_rank: Maximum rank after truncation.
+
+    Raises:
+        ValueError: If ``gesdd`` does not converge on an unfolding with NaN or
+            infinite entries.
 
     Returns:
         Truncated tensor train cores.
@@ -152,7 +193,7 @@ def left_svd(
                 shape[3],
             )
         )
-        U, S, V = svd(matrix, full_matrices=False, overwrite_a=True, check_finite=False)
+        U, S, V = _svd_with_fallback(matrix, i)
         next_bond = truncated_bond(S, delta, max_rank)
         U, C = (
             U[:, :next_bond].reshape((bond,) + physical_indexes + (next_bond,)),
@@ -172,10 +213,18 @@ def right_svd(
 ) -> List[np.ndarray]:
     """Right svd truncation of tensor train cores.
 
+    Each unfolding is decomposed with LAPACK ``gesdd``. If ``gesdd`` does not
+    converge, the unfolding is decomposed again with ``gesvd`` and a warning is
+    logged.
+
     Args:
         cores: Tensor train cores.
         error: Truncation threshold.
         max_rank: Maximum rank after truncation.
+
+    Raises:
+        ValueError: If ``gesdd`` does not converge on an unfolding with NaN or
+            infinite entries.
 
     Returns:
         Truncated tensor train cores.
@@ -194,7 +243,7 @@ def right_svd(
                 shape[1] * shape[2] * bond,
             )
         )
-        U, S, V = svd(matrix, full_matrices=False, overwrite_a=True, check_finite=False)
+        U, S, V = _svd_with_fallback(matrix, i)
         next_bond = truncated_bond(S, delta, max_rank)
         C, V = (
             U[:, :next_bond] @ np.diag(S[:next_bond]),

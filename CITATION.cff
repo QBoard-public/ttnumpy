@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use TTNumPy in your research, please cite it as below."
 type: software
 title: "TTNumPy: tensor-train toolbox for numerical linear algebra"
-version: 0.2.0
-date-released: 2026-11-02
+version: 0.2.1
+date-released: 2026-11-05
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/QBoard-public/ttnumpy"
 url: "https://qboard-public.github.io/ttnumpy/"

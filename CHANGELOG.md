@@ -5,6 +5,29 @@ All notable changes to TTNumPy are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0.0 a
 minor release may change the API.
 
+## [0.2.1] - 2026-11-05
+
+### Fixed
+
+- `TensorTrain.truncate` and `compress_svd` (through `utils.left_svd` and
+  `utils.right_svd`) no longer raise `LinAlgError` when LAPACK `gesdd` does not
+  converge on an unfolding: that unfolding is decomposed again with `gesvd`
+  while a warning is logged. If the unfolding has NaN or infinite entries, a
+  `ValueError` says so instead.
+- `TensorTrain.get_full_tensor` no longer fails on trains of 32 or more cores
+  whose result fits in a NumPy array. Inner products such as
+  `x.transpose(conjugate=True).dot(y).get_full_tensor()` work for any number of
+  cores.
+- `TensorTrain.truncate` and `compress_svd` no longer emit a `RuntimeWarning`
+  when the product of the bonds overflows int64. The compression ratio in the
+  debug log is computed only at DEBUG level, from per-bond ratios.
+- `amen` no longer returns bonds above the largest rank the train can have
+  there, the product of the modes on the smaller side. The enrichment of the
+  last sweep left such bonds next to the first core; they are now reduced
+  exactly, so the solution is unchanged.
+- The AMEn section of the user guide no longer says that bonds may exceed
+  `max_rank`; the enrichment never exceeds it.
+
 ## [0.2.0] - 2026-11-02
 
 First release on PyPI. Changes are relative to 0.1.0, which was installed from

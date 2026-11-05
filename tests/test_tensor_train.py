@@ -3,12 +3,15 @@
 
 """Test module for tensor train type"""
 
+import math
 import unittest
+import warnings
 
 import numpy as np
 import numpy.testing as npt
 
 from ttnumpy import tensor_train
+from ttnumpy.logger_config import PACKAGE_LOGGER_NAME
 
 TEST_DELTA = 1e-10
 DECIMAL = 10
@@ -270,6 +273,28 @@ class TestTTMethods(unittest.TestCase):
         svd_tt = orth_tt.compress_svd(TEST_DELTA, 3)
         npt.assert_array_less(svd_tt.bonds, 4)
         self.assertTrue(svd_tt.orth_center == 2)
+
+    def test_svd_does_not_warn_when_the_bond_product_overflows(self):
+        """Sixteen bonds of 16 multiply to 2**64, which is 0 in int64."""
+        train = tensor_train.rand([2] * 17, ranks=16, seed=108)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            train.compress_svd(1e-5)
+
+    def test_svd_logs_the_compression_of_a_long_train(self):
+        train = tensor_train.rand([2] * 17, ranks=16, seed=108)
+        with (
+            warnings.catch_warnings(),
+            self.assertLogs(PACKAGE_LOGGER_NAME, level="DEBUG") as captured,
+        ):
+            warnings.simplefilter("error")
+            compressed = train.compress_svd(1e-5)
+
+        # Python integers do not overflow
+        ratio = math.prod(compressed.bonds) / math.prod(train.bonds)
+        messages = [m for m in captured.output if "Total compression" in m]
+        self.assertEqual(len(messages), 1)
+        self.assertIn(f"Total compression: {ratio:.3g}", messages[0])
 
     def test_tt_truncation(self):
         """Test for truncation method."""
@@ -1429,6 +1454,37 @@ class TestTTInspection(unittest.TestCase):
         for index in (np.array([1, 2, 3]), list(np.array([1, 2, 3]))):
             with self.subTest(container=type(index).__name__):
                 self.assertEqual(tt_rand.get_element(index), expected)
+
+    def test_get_full_tensor_returns_an_inner_product_on_many_cores(self):
+        """The number of cores does not limit a scalar result."""
+        ones = tensor_train.ones([2] * 40)
+        self.assertEqual(ones.transpose().dot(ones).get_full_tensor(), 2.0**40)
+
+    def test_get_full_tensor_keeps_unit_modes_on_many_cores(self):
+        train = tensor_train.rand(physical_indexes=[1] * 39 + [3], ranks=2, seed=19)
+        expected = [train.get_element([0] * 39 + [k]) for k in range(3)]
+
+        full = train.get_full_tensor()
+
+        self.assertEqual(full.shape, (1,) * 39 + (3,))
+        npt.assert_allclose(full.reshape(-1), expected, rtol=1e-14)
+
+    def test_get_full_tensor_of_a_ttm_with_64_axes(self):
+        """32 cores give a TTM result with 64 axes, NumPy's largest array."""
+        modes = [(1, 1)] * 30 + [(2, 3), (3, 2)]
+        train = tensor_train.rand(physical_indexes=modes, ranks=2, seed=20)
+
+        full = train.get_full_tensor()
+
+        self.assertEqual(full.shape, (1,) * 30 + (2, 3) + (1,) * 30 + (3, 2))
+        for i, k, j, l in np.ndindex(2, 3, 3, 2):
+            index = [(0, 0)] * 30 + [(i, j), (k, l)]
+            with self.subTest(index=index[-2:]):
+                npt.assert_allclose(
+                    full[(0,) * 30 + (i, k) + (0,) * 30 + (j, l)],
+                    train.get_element(index),
+                    rtol=1e-14,
+                )
 
     def test_conj_inplace_writes_into_the_receiver(self):
         """``inplace=True`` must conjugate this train, not return a new one."""

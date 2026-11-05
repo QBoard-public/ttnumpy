@@ -296,9 +296,8 @@ Each solved core is SVD-truncated *before* the enrichment is appended:
 singular values below ``error_threshold`` relative to the largest are
 dropped, and ``max_rank`` caps the result. A bond therefore ends each step
 at the rank the accuracy budget requires plus at most ``kickrank``, instead
-of growing by ``kickrank`` on every visit. Because the enrichment is added
-on top of the truncated core, bonds may exceed ``max_rank`` by up to
-``kickrank``.
+of growing by ``kickrank`` on every visit. The enrichment fills only the
+slots left below ``max_rank``, so no bond exceeds it.
 
 Set ``error_threshold`` at or below the accuracy actually wanted — roughly
 ``residual_tol / 10`` is a reasonable default. A threshold that is too

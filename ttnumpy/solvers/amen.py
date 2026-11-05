@@ -48,6 +48,7 @@ Reference:
   https://doi.org/10.1137/140953289.
 """
 
+from math import prod
 from typing import Optional, Tuple, Union
 
 import numpy as np
@@ -330,7 +331,7 @@ def _enrich_right(
 
     With ``max_rank`` set the widened bond is hard-capped: after the shift the
     solved core occupies the leading ``rank`` bonds and the enrichment the
-    rest, whose neighbour rows are zero, so the surplus enrichment directions
+    rest, whose neighbour rows are zero, so the extra enrichment directions
     beyond ``max_rank`` (never the solution, since ``rank <= max_rank``) are
     dropped without changing the represented tensor.
     """
@@ -696,6 +697,16 @@ def amen(
         if monitor.record(sweep, x, max_bond=max(x.bonds), stats=sweep_stats):
             break
 
+    # the last backward enrichment can leave leading bonds larger than the
+    # product of the modes left of them; a QR sweep over those cores reduces them
+    redundant_bonds = [
+        k for k in range(1, n_cores) if x.bonds[k] > prod(x.row_modes[:k])
+    ]
+    if redundant_bonds:
+        x.orthonormalize(
+            canonical="left", center_position=redundant_bonds[-1], inplace=True
+        )
+        x.orthonormalize(canonical="right", center_position=0, inplace=True)
     x.max_rank = max(x.bonds)
     monitor.finish()
 
