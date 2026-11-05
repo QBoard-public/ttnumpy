@@ -16,8 +16,9 @@ other runtime dependencies.
 Documentation: <https://qboard-public.github.io/ttnumpy/>
 
 Development: <https://git.qboard.tech/qboard/rnd/ttnumpy> (GitLab). The GitHub
-repository <https://github.com/QBoard-public/ttnumpy> and GitVerse 
-<https://gitverse.ru/qboard/ttnumpy> mirrors its `main` branch.
+repository <https://github.com/QBoard-public/ttnumpy> and the GitVerse
+repository <https://gitverse.ru/qboard/ttnumpy> mirror its `main` branch, which
+GitVerse names `master`.
 
 ## Features
 
@@ -152,12 +153,13 @@ python -m sphinx -b latex docs docs/_build/latex && make -C docs/_build/latex
 
 ```
 ttnumpy/
-  __init__.py       public API: container, constructors, solvers
+  __init__.py       public API: container, constructors, solvers, TCI
   tensor_train.py   the TensorTrain container and its constructors
   solvers/          ALS, MALS and AMEn over a shared core
+  interpolation/    tensor cross interpolation (TCI)
   utils.py          norms, orthonormalization, SVD truncation
   logger_config.py  application-facing logging setup
-  test/             the test suite
+tests/              the test suite
 docs/               Sphinx sources
 ```
 
@@ -169,6 +171,10 @@ normalization, truncation, arithmetic and quantization methods.
 (`als`, `mals`, `amen`) over a shared `common` module holding the
 environments, the local solves and the stopping machinery. All three are
 re-exported from the top level, so `tt.mals(...)` reaches them directly.
+
+`ttnumpy.interpolation` contains tensor cross interpolation: `tci`,
+`add_global_pivots`, `recompress`, `TensorCI`, `TCIInfo` and `BlackBox`, all
+re-exported from the top level.
 
 `ttnumpy.utils` contains lower-level helpers for tensor norms,
 orthonormalization and SVD-based truncation.
@@ -228,8 +234,9 @@ The five rows are:
 Development happens in the GitLab repository
 <https://git.qboard.tech/qboard/rnd/ttnumpy>, where merge requests are opened.
 Its CI runs the tests, the linters, the documentation build and the
-benchmarks. Changes reach the GitHub repository through a mirror of `main`;
-the only workflow on GitHub publishes the documentation.
+benchmarks. Changes reach the GitHub repository through a mirror of `main`.
+On GitHub, `docs.yml` publishes the documentation and `release.yml` publishes
+tagged releases to PyPI.
 
 The test suite runs with `pytest` from the repository root:
 

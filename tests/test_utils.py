@@ -12,12 +12,15 @@ over ``list(tt.cores)`` and keep ``tt`` itself as the untouched reference.
 """
 
 import unittest
+from unittest import mock
 
 import numpy as np
 import numpy.testing as npt
+import scipy.linalg
 
 from ttnumpy import tensor_train
 from ttnumpy import utils
+from ttnumpy.logger_config import PACKAGE_LOGGER_NAME
 
 TEST_DELTA = 1e-10
 RTOL = 1e-10
@@ -235,3 +238,58 @@ class TestSvdSweeps(unittest.TestCase):
 
         self.assertEqual([id(c) for c in train.cores], [id(c) for c in original_cores])
         npt.assert_array_equal(train.get_full_tensor(), reference)
+
+
+def _svd_failing_in_gesdd(failures: int):
+    """``scipy.linalg.svd`` whose first ``failures`` gesdd calls do not converge.
+
+    Returns the replacement and the list of drivers it is called with.
+    """
+    drivers = []
+
+    def svd(matrix, **kwargs):
+        driver = kwargs.get("lapack_driver", "gesdd")
+        drivers.append(driver)
+        if driver == "gesdd" and drivers.count("gesdd") <= failures:
+            raise scipy.linalg.LinAlgError("SVD did not converge")
+        return scipy.linalg.svd(matrix, **kwargs)
+
+    return svd, drivers
+
+
+class TestSvdFallback(unittest.TestCase):
+    """A ``gesdd`` convergence failure in an SVD sweep is repeated with ``gesvd``."""
+
+    def test_only_the_failed_unfolding_is_repeated_with_gesvd(self):
+        train = _reference_train(13)
+        reference = train.get_full_tensor()
+        for sweep in (utils.left_svd, utils.right_svd):
+            with self.subTest(sweep=sweep.__name__):
+                svd, drivers = _svd_failing_in_gesdd(failures=1)
+                with (
+                    mock.patch.object(utils, "svd", svd),
+                    self.assertLogs(PACKAGE_LOGGER_NAME, level="WARNING") as captured,
+                ):
+                    cores = sweep(list(train.cores), TEST_DELTA)
+
+                # three cores give two unfoldings; the second one is not retried
+                self.assertEqual(drivers, ["gesdd", "gesvd", "gesdd"])
+                self.assertEqual(len(captured.records), 1)
+                result = tensor_train.TensorTrain(cores)
+                npt.assert_allclose(
+                    result.get_full_tensor(), reference, rtol=RTOL, atol=ATOL
+                )
+
+    def test_a_failure_on_non_finite_entries_raises_value_error(self):
+        """NaN and inf entries are reported instead of decomposed with gesvd."""
+        for value in (np.nan, np.inf):
+            with self.subTest(value=value):
+                cores = list(_reference_train(14).cores)
+                cores[0] = cores[0].copy()
+                cores[0][0, 1, 0, 2] = value
+                svd, drivers = _svd_failing_in_gesdd(failures=1)
+                # LinAlgError subclasses ValueError, so the message is checked
+                with mock.patch.object(utils, "svd", svd):
+                    with self.assertRaisesRegex(ValueError, "NaN or infinite"):
+                        utils.left_svd(cores, TEST_DELTA)
+                self.assertEqual(drivers, ["gesdd"])

@@ -461,11 +461,14 @@ class TensorTrain:
 
         For TT format, resulting tensor will have shape (row_dim_1, row_dim_2, ...).
         For TTM format, resulting tensor will have shape (row_dim_1, row_dim_2, ..., col_dim_1, col_dim_2, ...).
+        If every dimension is 1, the single entry is returned as a scalar.
         """
 
-        tensor = np.tensordot(self.cores[0], self.cores[1], axes=1)
-        for i in range(2, self.n_cores):
-            tensor = np.tensordot(tensor, self.cores[i], axes=1)
+        tensor = self.cores[0].reshape(-1, self.cores[0].shape[-1])
+        for core in self.cores[1:]:
+            tensor = (tensor @ core.reshape(core.shape[0], -1)).reshape(
+                -1, core.shape[-1]
+            )
         shape = self.row_modes
         if self.tt_type == TensorTrainType.TTM:
             shape = [x for pair in zip(self.row_modes, self.col_modes) for x in pair]
@@ -685,11 +688,12 @@ class TensorTrain:
         tt_compressed.bonds = [
             tt_compressed.cores[i].shape[0] for i in range(tt_compressed.n_cores)
         ] + [1]
-        logger.debug(
-            "Truncated bonds after SVD: %s\nTotal compression: %f",
-            tt_compressed.bonds,
-            np.prod(tt_compressed.bonds) / np.prod(initial_bonds),
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Truncated bonds after SVD: %s\nTotal compression: %.3g",
+                tt_compressed.bonds,
+                np.prod(np.divide(tt_compressed.bonds, initial_bonds)),
+            )
         tt_compressed.max_rank = max(tt_compressed.bonds)
 
         return tt_compressed
