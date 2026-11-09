@@ -273,7 +273,7 @@ def mals(
             )
             x.bonds[k + 1] = next_bond
             if k == 0:
-                x.cores[k] = (U[:, :next_bond] @ np.diag(S[:next_bond])).reshape(
+                x.cores[k] = (U[:, :next_bond] * S[:next_bond]).reshape(
                     x.bonds[k],
                     x.cores[k].shape[1],
                     1,

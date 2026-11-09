@@ -16,6 +16,7 @@ import scipy.linalg as lin
 import scipy.sparse.linalg as spla
 
 from ttnumpy import tensor_train
+from ttnumpy.utils import _multiply_left, _multiply_right
 from ttnumpy.solvers.common import (
     _SolverSettings,
     _solve_local_system,
@@ -187,7 +188,7 @@ def _shift_center_right(x: tensor_train.TensorTrain, k: int, core: np.ndarray) -
     Q, R = lin.qr(core.reshape(-1, core.shape[-1]), mode="economic")
     new_bond = Q.shape[1]
     x.cores[k] = Q.reshape(core.shape[0], mode, 1, new_bond)
-    x.cores[k + 1] = np.tensordot(R, x.cores[k + 1], axes=(1, 0))
+    x.cores[k + 1] = _multiply_left(R, x.cores[k + 1])
     x.bonds[k + 1] = new_bond
     x.orth_center = k + 1
 
@@ -203,6 +204,6 @@ def _shift_center_left(x: tensor_train.TensorTrain, k: int, core: np.ndarray) ->
     Q, R = lin.qr(core.reshape(core.shape[0], -1).T, mode="economic")
     new_bond = Q.shape[1]
     x.cores[k] = Q.T.reshape(new_bond, mode, 1, right_bond)
-    x.cores[k - 1] = np.tensordot(x.cores[k - 1], R.T, axes=(3, 0))
+    x.cores[k - 1] = _multiply_right(x.cores[k - 1], R.T)
     x.bonds[k] = new_bond
     x.orth_center = k - 1
