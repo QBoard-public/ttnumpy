@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional, Tuple
 
 import numpy as np
-from scipy.linalg import LinAlgError, qr, rq, svd
+from scipy.linalg import LinAlgError, qr, svd
 
 from ttnumpy.logger_config import PACKAGE_LOGGER_NAME
 
@@ -61,13 +61,26 @@ def truncated_bond(
     # untouched tail makes the bond follow the build rather than the matrix
     if values.size:
         cutoff = np.finfo(dtype).eps * values.size * values[0]
-        values = np.where(values <= cutoff, 0.0, values)
-    squares = values**2
-    tail = np.concatenate([np.cumsum(squares[::-1])[::-1], [0.0]])
-    bond = max(1, int(np.searchsorted(-tail, -(delta * delta), side="left")))
+        values[values <= cutoff] = 0.0
+    tail = np.cumsum((values**2)[::-1])[::-1]
+    bond = max(1, int(np.count_nonzero(tail > delta * delta)))
     if max_rank is not None:
         bond = min(bond, max_rank)
     return bond
+
+
+def _multiply_left(matrix: np.ndarray, core: np.ndarray) -> np.ndarray:
+    """Contract ``matrix`` (m, r) with the first axis of ``core`` (r, ...)."""
+    return (matrix @ core.reshape(core.shape[0], -1)).reshape(
+        (matrix.shape[0],) + core.shape[1:]
+    )
+
+
+def _multiply_right(core: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Contract the last axis of ``core`` (..., r) with ``matrix`` (r, m)."""
+    return (core.reshape(-1, core.shape[-1]) @ matrix).reshape(
+        core.shape[:-1] + (matrix.shape[1],)
+    )
 
 
 def left_orthonormalize(
@@ -95,7 +108,7 @@ def left_orthonormalize(
             mode="economic",
         )
         cores[i] = Q.reshape((shape[0], shape[1], shape[2], -1))
-        cores[i + 1] = np.tensordot(R, cores[i + 1], axes=(1, 0))
+        cores[i + 1] = _multiply_left(R, cores[i + 1])
     return cores
 
 
@@ -114,17 +127,12 @@ def right_orthonormalize(
     """
     for i in range(start, end, -1):
         shape = cores[i].shape
-        R, Q = rq(
-            cores[i].reshape(
-                (
-                    shape[0],
-                    shape[1] * shape[2] * shape[3],
-                )
-            ),
+        Q, R = qr(
+            cores[i].reshape((shape[0], shape[1] * shape[2] * shape[3])).T,
             mode="economic",
         )
-        cores[i] = Q.reshape((-1, shape[1], shape[2], shape[3]))
-        cores[i - 1] = np.tensordot(cores[i - 1], R, axes=(3, 0))
+        cores[i] = Q.T.reshape((-1, shape[1], shape[2], shape[3]))
+        cores[i - 1] = _multiply_right(cores[i - 1], R.T)
     return cores
 
 
@@ -197,11 +205,11 @@ def left_svd(
         next_bond = truncated_bond(S, delta, max_rank)
         U, C = (
             U[:, :next_bond].reshape((bond,) + physical_indexes + (next_bond,)),
-            np.diag(S[:next_bond]) @ V[:next_bond, :],
+            S[:next_bond, None] * V[:next_bond, :],
         )
         cores[i] = U
         next_bond = C.shape[0]
-        cores[i + 1] = np.tensordot(C, cores[i + 1], axes=(1, 0))
+        cores[i + 1] = _multiply_left(C, cores[i + 1])
         bond = next_bond
     return cores
 
@@ -246,10 +254,10 @@ def right_svd(
         U, S, V = _svd_with_fallback(matrix, i)
         next_bond = truncated_bond(S, delta, max_rank)
         C, V = (
-            U[:, :next_bond] @ np.diag(S[:next_bond]),
+            U[:, :next_bond] * S[:next_bond],
             V[:next_bond, :].reshape((next_bond,) + physical_indexes + (bond,)),
         )
         cores[i] = V
-        cores[i - 1] = np.tensordot(cores[i - 1], C, axes=(3, 0))
+        cores[i - 1] = _multiply_right(cores[i - 1], C)
         bond = next_bond
     return cores

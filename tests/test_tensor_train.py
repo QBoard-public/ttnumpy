@@ -596,6 +596,11 @@ class TestTTMethods(unittest.TestCase):
 class TestTTConstructors(unittest.TestCase):
     """Tests for tensor train constructors."""
 
+    def test_rank_four_cores_with_unit_column_modes_form_a_tt(self):
+        train = tensor_train.TensorTrain([np.ones((1, 2, 1, 3)), np.ones((3, 4, 1, 1))])
+        self.assertEqual(train.tt_type, tensor_train.TensorTrainType.TT)
+        self.assertEqual(train.max_rank, 3)
+
     def test_tt_svd_respects_the_requested_error_on_a_flat_spectrum(self):
         """``error`` is an upper bound, not a per-singular-value threshold.
 
@@ -1510,6 +1515,16 @@ class TestTTInspection(unittest.TestCase):
         self.assertIsNot(result, train)
         npt.assert_array_equal(train.get_full_tensor(), before)
 
+    def test_truncate_without_inplace_leaves_the_receiver_alone(self):
+        train = tensor_train.rand(physical_indexes=[2] * 6, ranks=4, seed=32)
+        before, bonds = train.get_full_tensor(), list(train.bonds)
+
+        result = train.truncate(error=1e-2)
+
+        self.assertIsNot(result, train)
+        self.assertEqual(train.bonds, bonds)
+        npt.assert_array_equal(train.get_full_tensor(), before)
+
     def test_str_reports_the_train_type_and_shape(self):
         tt_rand = tensor_train.rand(physical_indexes=[2] * 3, ranks=2, seed=16)
         ttm_rand = tensor_train.rand(physical_indexes=[(2, 2)] * 3, ranks=2, seed=17)
@@ -1529,6 +1544,72 @@ class TestTTInspection(unittest.TestCase):
         npt.assert_allclose(
             truncated.get_full_tensor(), reference, rtol=1e-9, atol=1e-11
         )
+
+
+class TestTTMatricize(unittest.TestCase):
+    """``matricize`` is ``get_full_tensor`` reshaped to a vector or a matrix."""
+
+    def test_matches_the_reshaped_full_tensor(self):
+        real = tensor_train.rand([(2, 2)] * 3, ranks=2, seed=23)
+        imag = tensor_train.rand([(2, 2)] * 3, ranks=2, seed=24)
+        cases = {
+            "TT": tensor_train.rand([2, 3, 4], ranks=3, seed=25),
+            "TTM": tensor_train.rand([(2, 3), (3, 2), (2, 2)], ranks=3, seed=26),
+            "TTM with unit modes": tensor_train.rand(
+                [(1, 2), (2, 1), (3, 3)], ranks=2, seed=27
+            ),
+            "complex TTM": tensor_train.TensorTrain(
+                [r + 1j * i for r, i in zip(real.cores, imag.cores)]
+            ),
+        }
+        for name, train in cases.items():
+            with self.subTest(name):
+                full = train.get_full_tensor()
+                rows, cols = math.prod(train.row_modes), math.prod(train.col_modes)
+                shape = (rows, cols) if train.is_ttm() else (rows,)
+
+                result = train.matricize()
+
+                self.assertEqual(result.dtype, full.dtype)
+                npt.assert_array_equal(result, full.reshape(shape))
+
+    def test_shape_follows_the_train_type(self):
+        vector = tensor_train.rand([2, 3, 4], ranks=2, seed=28)
+        operator = tensor_train.rand([(2, 3)] * 3, ranks=2, seed=29)
+        column = tensor_train.TensorTrain([c[:, :, :1, :] for c in operator.cores])
+        cases = {
+            "TT": (vector, (24,)),
+            "TTM": (operator, (8, 27)),
+            "transposed TT": (vector.transpose(), (1, 24)),
+            "one column of a TTM": (column, (8,)),
+            "inner product": (vector.transpose().dot(vector), (1,)),
+        }
+        for name, (train, shape) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(train.matricize().shape, shape)
+
+    def test_tt_with_more_than_64_cores(self):
+        """get_full_tensor() would need one axis per core, 71 in total."""
+        train = tensor_train.rand([1] * 70 + [3], ranks=2, seed=30)
+
+        result = train.matricize()
+
+        expected = [train.get_element([0] * 70 + [k]) for k in range(3)]
+        npt.assert_allclose(result, expected, rtol=1e-14)
+
+    def test_ttm_with_more_than_32_cores(self):
+        """get_full_tensor() would need a row and a column axis per core, 68."""
+        modes = [(1, 1)] * 30 + [(3, 3)] + [(1, 2)] * 3
+        train = tensor_train.rand(modes, ranks=2, seed=31)
+
+        result = train.matricize()
+
+        self.assertEqual(result.shape, (3, 24))
+        for i, j in np.ndindex(result.shape):
+            cols = np.unravel_index(j, (3, 2, 2, 2))
+            index = [(0, 0)] * 30 + [(i, cols[0])] + [(0, c) for c in cols[1:]]
+            with self.subTest(entry=(i, j)):
+                npt.assert_allclose(result[i, j], train.get_element(index), rtol=1e-14)
 
 
 class TestTTSvdValidation(unittest.TestCase):
@@ -1597,6 +1678,22 @@ class TestTTConjugateTranspose(unittest.TestCase):
         )
         cores = [(r + 1j * i).astype(complex) for r, i in zip(real.cores, imag.cores)]
         return tensor_train.TensorTrain(cores)
+
+    def test_transpose_that_leaves_every_column_mode_at_1_stays_a_tt(self):
+        """The type follows the modes, as in the constructor and so in copy()."""
+        cases = {
+            "unit modes": tensor_train.ones([1, 1, 1]).transpose(),
+            "no cores": tensor_train.rand([2, 3], ranks=2, seed=21).transpose(
+                cores_ind=[]
+            ),
+            "unit core": tensor_train.rand([1, 3], ranks=2, seed=22).transpose(
+                cores_ind=[0]
+            ),
+        }
+        for name, transposed in cases.items():
+            with self.subTest(name):
+                self.assertFalse(transposed.is_ttm())
+                self.assertEqual(transposed.tt_type, transposed.copy().tt_type)
 
     def test_conjugate_transpose_inplace_matches_the_copying_path(self):
         """The in-place branch writes through ``np.conj(..., out=...)``.

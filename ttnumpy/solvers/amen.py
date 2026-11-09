@@ -56,6 +56,7 @@ import scipy.linalg as lin
 import scipy.sparse.linalg as spla
 
 from ttnumpy import tensor_train
+from ttnumpy.utils import _multiply_left, _multiply_right
 from ttnumpy.solvers.common import (
     LocalSolver,
     SolverInfo,
@@ -337,8 +338,8 @@ def _enrich_right(
     """
     enriched = np.concatenate([core, block], axis=2)
     zeros = np.zeros((block.shape[2], carry.shape[1]), dtype=carry.dtype)
-    x.cores[k + 1] = np.tensordot(
-        np.concatenate([carry, zeros], axis=0), x.cores[k + 1], axes=(1, 0)
+    x.cores[k + 1] = _multiply_left(
+        np.concatenate([carry, zeros], axis=0), x.cores[k + 1]
     )
     _shift_center_right(x, k, enriched)
     capped = max_rank is not None and x.bonds[k + 1] > max_rank
@@ -369,8 +370,8 @@ def _enrich_left(
     """
     enriched = np.concatenate([core, block], axis=0)
     zeros = np.zeros((carry.shape[0], block.shape[0]), dtype=carry.dtype)
-    x.cores[k - 1] = np.tensordot(
-        x.cores[k - 1], np.concatenate([carry, zeros], axis=1), axes=(3, 0)
+    x.cores[k - 1] = _multiply_right(
+        x.cores[k - 1], np.concatenate([carry, zeros], axis=1)
     )
     _shift_center_left(x, k, enriched)
     capped = max_rank is not None and x.bonds[k] > max_rank
@@ -690,7 +691,7 @@ def amen(
                     residual_damp,
                     stats=sweep_stats,
                 )
-                block = np.tensordot(z_new, right_env_xz[k], axes=(2, 0))
+                block = _multiply_right(z_new, right_env_xz[k])
                 _enrich_left(x, k, core, carry, block, max_rank, stats=sweep_stats)
                 _shift_center_left(z, k, z_new)
 

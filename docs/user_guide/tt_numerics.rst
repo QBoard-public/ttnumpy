@@ -78,6 +78,9 @@ In this library:
    # exact round trip
    print(np.allclose(train.get_full_tensor(), full))  # True
 
+   # the same entries as a vector
+   print(train.matricize().shape)  # (24,)
+
 The signature is
 
 .. code-block:: python
@@ -87,6 +90,12 @@ The signature is
 ``error`` sets the relative accuracy target, ``max_rank`` caps every bond,
 and ``ttm=True`` with ``physical_indexes`` given as pairs produces a TTM
 instead of a TT.
+
+``get_full_tensor()`` returns one axis per mode, as in the round trip above.
+``matricize()`` returns the same entries as a vector for a TT, or for a TTM as
+a matrix whose rows run over all row modes and whose columns run over all
+column modes. It also works on long trains whose result is small, where one
+axis per mode would exceed NumPy's limit on array dimensions.
 
 The accuracy guarantee
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -5,6 +5,35 @@ All notable changes to TTNumPy are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0.0 a
 minor release may change the API.
 
+## [Unreleased]
+
+### Added
+
+- `TensorTrain.matricize`: the entries of a TT as a vector, of a TTM as a
+  matrix with the row modes as rows and the column modes as columns. It works
+  for any number of cores when the result fits in memory.
+
+### Changed
+
+- Rounding and building trains with small cores take less time. The
+  constructor validates the cores in one pass. `TensorTrain.truncate` copies
+  the train once instead of three times. `utils.truncated_bond` and the sweep
+  helpers in `utils` make fewer NumPy calls. On trains of 13 binary cores with
+  bonds 8–24, truncation takes 8–27% less time and the AMEn and MALS solvers
+  take about 8% less.
+- `utils.right_orthonormalize` takes a QR factorization of the transposed
+  unfolding instead of an RQ factorization. Results of the operations that
+  right-orthonormalize a train differ at round-off level: `orthonormalize("right")`,
+  `truncate` with the orthogonality centre in the left half, `tt_norm` of a
+  train without one, `tt_to_qtt` and the solvers, whose results differ within
+  the solver tolerance.
+
+### Fixed
+
+- `TensorTrain.transpose` no longer marks a train as a TTM when every column
+  mode stays 1, as in `x.transpose(cores_ind=[])`. The type now follows the
+  rule of the constructor, so it no longer changes on `copy()`.
+
 ## [0.2.1] - 2026-11-05
 
 ### Fixed

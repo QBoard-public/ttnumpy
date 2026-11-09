@@ -103,56 +103,49 @@ class TensorTrain:
         if len(cores) < 2:
             raise WrongTTFormat("Tensor train must has at least 2 sites")
 
-        self.n_cores = len(cores)  # number of cores
-        self.cores = cores  # list of cores
-        self.max_rank = 1  # maximal bond dimension
-        self.orth_center = None  # position of orthogonal center
-        self.row_modes = []  # physical row dimensions
-        self.col_modes = []  # physical column dimensions
-        self.bonds = [1]  # bond dimensions
-
-        if np.all([len(self.cores[i].shape) == 3 for i in range(self.n_cores)]):
-            self.tt_type = TensorTrainType.TT
-        elif np.all([len(self.cores[i].shape) == 4 for i in range(self.n_cores)]):
-            if np.all([self.cores[i].shape[2] == 1 for i in range(self.n_cores)]):
-                self.tt_type = TensorTrainType.TT
-            else:
-                self.tt_type = TensorTrainType.TTM
+        ndims = {core.ndim for core in cores}
+        if ndims == {3}:
+            tt_type = TensorTrainType.TT
+        elif ndims == {4}:
+            tt_type = (
+                TensorTrainType.TT
+                if all(core.shape[2] == 1 for core in cores)
+                else TensorTrainType.TTM
+            )
         else:
             raise WrongTTFormat("All cores must be 3 or 4 rank tensors")
 
-        for i in range(self.n_cores):
-            core_shape = self.cores[i].shape
+        bonds, row_modes, col_modes = [1], [], []
+        for i, core in enumerate(cores):
+            core_shape = core.shape
 
             if i == 0 and core_shape[0] != 1:
                 raise WrongTTFormat(
                     "Only open boundary conditions is supported, first core must has first index equal to 1"
                 )
-            if i == self.n_cores - 1 and core_shape[-1] != 1:
+            if i == len(cores) - 1 and core_shape[-1] != 1:
                 raise WrongTTFormat(
                     "Only open boundary conditions is supported, last core must has last index equal to 1"
                 )
-            if core_shape[0] != self.bonds[i]:
+            if core_shape[0] != bonds[i]:
                 raise DimensionMismatch(
-                    f"Connected sites bonds are mismatching: {core_shape[0]} != {self.bonds[i]}"
+                    f"Connected sites bonds are mismatching: {core_shape[0]} != {bonds[i]}"
                 )
 
-            if self.tt_type == TensorTrainType.TT:
-                self.row_modes.append(core_shape[1])
-                self.col_modes.append(1)
-                self.cores[i] = self.cores[i].reshape(
-                    (core_shape[0], core_shape[1], 1, core_shape[-1])
-                )
-            elif self.tt_type == TensorTrainType.TTM:
-                self.row_modes.append(core_shape[1])
-                self.col_modes.append(core_shape[2])
-            else:
-                raise WrongTTFormat("All cores must be 3 or 4 rank tensors")
+            if core.ndim == 3:
+                cores[i] = core.reshape(core_shape[0], core_shape[1], 1, core_shape[2])
+            row_modes.append(core_shape[1])
+            col_modes.append(core_shape[2] if tt_type == TensorTrainType.TTM else 1)
+            bonds.append(core_shape[-1])
 
-            self.max_rank = (
-                core_shape[-1] if core_shape[-1] > self.max_rank else self.max_rank
-            )
-            self.bonds.append(core_shape[-1])
+        self.n_cores = len(cores)  # number of cores
+        self.cores = cores  # list of cores
+        self.max_rank = max(bonds)  # maximal bond dimension
+        self.orth_center = None  # position of orthogonal center
+        self.row_modes = row_modes  # physical row dimensions
+        self.col_modes = col_modes  # physical column dimensions
+        self.bonds = bonds  # bond dimensions
+        self.tt_type = tt_type
 
         logger.debug(
             "%s with rank %s saved.\nBond dimensions: %s",
@@ -456,6 +449,15 @@ class TensorTrain:
 
         return contraction.item()
 
+    def _contract_cores(self) -> np.ndarray:
+        """Entries of the train as a vector, ordered row_1, col_1, row_2, col_2, ..."""
+        tensor = self.cores[0].reshape(-1, self.cores[0].shape[-1])
+        for core in self.cores[1:]:
+            tensor = (tensor @ core.reshape(core.shape[0], -1)).reshape(
+                -1, core.shape[-1]
+            )
+        return tensor.reshape(-1)
+
     def get_full_tensor(self) -> np.ndarray:
         """Collapse train into full tensor.
 
@@ -464,11 +466,7 @@ class TensorTrain:
         If every dimension is 1, the single entry is returned as a scalar.
         """
 
-        tensor = self.cores[0].reshape(-1, self.cores[0].shape[-1])
-        for core in self.cores[1:]:
-            tensor = (tensor @ core.reshape(core.shape[0], -1)).reshape(
-                -1, core.shape[-1]
-            )
+        tensor = self._contract_cores()
         shape = self.row_modes
         if self.tt_type == TensorTrainType.TTM:
             shape = [x for pair in zip(self.row_modes, self.col_modes) for x in pair]
@@ -486,6 +484,28 @@ class TensorTrain:
             return tensor.item()
 
         return tensor.reshape(shape)
+
+    def matricize(self) -> np.ndarray:
+        """Collapse train into a vector or a matrix.
+
+        For TT format, the result is a vector of length prod(row_dims).
+        For TTM format, the result is a matrix of shape (prod(row_dims), prod(col_dims)).
+        The order of the entries is that of get_full_tensor() reshaped to this shape.
+        A train whose dimensions are all 1 gives a vector of length 1.
+        """
+
+        entries = self._contract_cores()
+        if not self.is_ttm():
+            return entries
+
+        modes = [x for pair in zip(self.row_modes, self.col_modes) for x in pair]
+        kept = [axis for axis, mode in enumerate(modes) if mode > 1]
+        permute = [i for i, axis in enumerate(kept) if axis % 2 == 0]
+        permute += [i for i, axis in enumerate(kept) if axis % 2 == 1]
+        tensor = entries.reshape([modes[axis] for axis in kept])
+        return tensor.transpose(permute).reshape(
+            prod(self.row_modes), prod(self.col_modes)
+        )
 
     def __str__(self):
         """Get main attributes of tensor train."""
@@ -530,11 +550,11 @@ class TensorTrain:
                 else:
                     new_cores[i] = new_cores[i].conj()
 
-        if not tt_transpose.is_ttm():
-            tt_transpose.tt_type = TensorTrainType.TTM
-        else:
-            if all(dim == 1 for dim in tt_transpose.col_modes):
-                tt_transpose.tt_type = TensorTrainType.TT
+        tt_transpose.tt_type = (
+            TensorTrainType.TT
+            if all(dim == 1 for dim in tt_transpose.col_modes)
+            else TensorTrainType.TTM
+        )
 
         return tt_transpose
 
@@ -746,12 +766,8 @@ class TensorTrain:
                 orth_form = "left"
             else:
                 orth_form = "right"
-        if inplace:
-            tt_trunc.orthonormalize(canonical=orth_form, inplace=True)
-            tt_trunc.compress_svd(error, max_rank, inplace=True)
-        else:
-            tt_trunc = tt_trunc.orthonormalize(canonical=orth_form)
-            tt_trunc = tt_trunc.compress_svd(error, max_rank)
+        tt_trunc.orthonormalize(canonical=orth_form, inplace=True)
+        tt_trunc.compress_svd(error, max_rank, inplace=True)
 
         return tt_trunc
 
