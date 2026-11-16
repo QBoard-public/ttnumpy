@@ -55,6 +55,55 @@ def _update_bonds(tt: "TensorTrain") -> List[int]:
     return [tt.cores[i].shape[0] for i in range(tt.n_cores)] + [1]
 
 
+def _round_result(
+    result: "TensorTrain",
+    truncate: bool,
+    error: Optional[float],
+    max_rank: Optional[int],
+    method: str,
+    seed: Optional[int],
+    options: Optional[dict],
+) -> "TensorTrain":
+    """Round the result of an arithmetic operation in place if ``truncate`` is set.
+
+    Raises:
+        ValueError: If error, max_rank or method is given without ``truncate``.
+    """
+    if not truncate:
+        if method != "direct" or error is not None or max_rank is not None:
+            raise ValueError("error, max_rank and method need truncate=True")
+        return result
+    return result.truncate(
+        error=0.0 if error is None else error,
+        max_rank=max_rank,
+        inplace=True,
+        method=method,
+        seed=seed,
+        options=options,
+    )
+
+
+def _sketch_rank(max_rank: Optional[int], options: Optional[dict]) -> int:
+    """Bond of the random sketch of the ``"randomized"`` method.
+
+    Raises:
+        ValueError: If max_rank is not given, or if options has an unknown key
+            or an oversampling that is not a non-negative integer.
+    """
+    if max_rank is None:
+        raise ValueError("method='randomized' needs max_rank")
+    options = {} if options is None else options
+    unknown = set(options) - {"oversampling"}
+    if unknown:
+        raise ValueError(f"Unknown options for method='randomized': {sorted(unknown)}")
+    oversampling = options.get("oversampling", 10)
+    if not isinstance(oversampling, numbers.Integral) or oversampling < 0:
+        raise ValueError(
+            f"oversampling must be a non-negative integer, but got {oversampling!r}"
+        )
+    return max_rank + oversampling
+
+
 class TensorTrainType(Enum):
     "Type of Tensor Train"
 
@@ -162,7 +211,16 @@ class TensorTrain:
         """Get number of cores."""
         return self.n_cores
 
-    def add(self, other: "TensorTrain", truncate: bool = False) -> "TensorTrain":
+    def add(
+        self,
+        other: "TensorTrain",
+        truncate: bool = False,
+        error: Optional[float] = None,
+        max_rank: Optional[int] = None,
+        method: Literal["direct", "randomized"] = "direct",
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
+    ) -> "TensorTrain":
         """Sum of two tensor trains.
 
         Resulting tensor train will have bond dimensions equal to sum of
@@ -170,11 +228,21 @@ class TensorTrain:
 
         Args:
             other: Tensor train to be added;
-            truncate: If True, truncate resulting tensor train after addition (default=False).
+            truncate: If True, truncate resulting tensor train after addition (default=False);
+            error: Allowed error of that truncation, as in ``truncate()``
+                (default=0.0). Needs ``truncate=True``;
+            max_rank: Bound for the bond dimension of that truncation, as in
+                ``truncate()`` (default: no bound). Needs ``truncate=True``;
+            method: Method of that truncation, ``"direct"`` (default) or
+                ``"randomized"``, as in ``truncate()``. Needs ``truncate=True``;
+            seed: Seed of the ``"randomized"`` method, as in ``truncate()``;
+            options: Options of the ``"randomized"`` method, as in ``truncate()``.
 
         Raises:
             TypeError: If other is not TensorTrain type;
-            DimensionMismatch: If tensor trains have different physical dimensions.
+            DimensionMismatch: If tensor trains have different physical dimensions;
+            ValueError: If error, max_rank or method is given without
+                ``truncate=True``.
 
         Returns:
             TensorTrain: Sum of two tensor trains.
@@ -209,11 +277,9 @@ class TensorTrain:
             r_4 = ranks[i + 1]
             cores[i][r_1:r_2, :, :, r_3:r_4] = other[i]
 
-        tt_sum = TensorTrain(cores)
-        if truncate:
-            tt_sum.truncate(inplace=True)
-
-        return tt_sum
+        return _round_result(
+            TensorTrain(cores), truncate, error, max_rank, method, seed, options
+        )
 
     def __add__(self, other: "TensorTrain") -> "TensorTrain":
         """Addition operator for two tensor trains."""
@@ -223,21 +289,53 @@ class TensorTrain:
         self,
         other: Union[int, float, complex, "TensorTrain"],
         truncate: bool = False,
+        error: Optional[float] = None,
+        max_rank: Optional[int] = None,
+        method: Literal["direct", "randomized"] = "direct",
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
     ) -> "TensorTrain":
         """
         Element-wise product of two tensor trains or tensor train and scalar.
 
         Args:
             other: Tensor train or scalar to be multiplied;
-            truncate: If True, truncate resulting tensor train after multiplication (default=False).
+            truncate: If True, truncate resulting tensor train after multiplication (default=False);
+            error: Allowed error of that truncation, as in ``truncate()``
+                (default=0.0). Needs ``truncate=True``;
+            max_rank: Bound for the bond dimension of that truncation, as in
+                ``truncate()`` (default: no bound). Needs ``truncate=True``;
+            method: Method of that truncation, ``"direct"`` (default) or
+                ``"randomized"``, as in ``truncate()``. Needs ``truncate=True``.
+                With ``"randomized"`` the product of two tensor trains is not
+                built: :func:`ttnumpy.utils.randomized_hadamard` computes its
+                left-orthonormal cores from the two trains, then the SVD
+                sweep truncates them;
+            seed: Seed of the ``"randomized"`` method, as in ``truncate()``;
+            options: Options of the ``"randomized"`` method, as in ``truncate()``.
 
         Raises:
             TypeError: If other is not TensorTrain type or scalar;
-            DimensionMismatch: If tensor trains have different physical dimensions.
+            DimensionMismatch: If tensor trains have different physical dimensions;
+            ValueError: If error, max_rank or method is given without
+                ``truncate=True``.
         """
         if isinstance(other, TensorTrain):
             if self.physical_dims() != other.physical_dims():
                 raise DimensionMismatch("Tensor trains must have the same dimensions")
+            if truncate and method == "randomized":
+                prod_res = TensorTrain(
+                    utils.randomized_hadamard(
+                        self.cores,
+                        other.cores,
+                        _sketch_rank(max_rank, options),
+                        np.random.default_rng(seed),
+                    )
+                )
+                prod_res.orth_center = prod_res.n_cores - 1
+                return prod_res.compress_svd(
+                    0.0 if error is None else error, max_rank, inplace=True
+                )
 
             prod_cores = []
 
@@ -266,10 +364,7 @@ class TensorTrain:
                 f"unsupported operand type(s) for *: 'TensorTrain' and '{type(other)}'"
             )
 
-        if truncate:
-            prod_res.truncate(inplace=True)
-
-        return prod_res
+        return _round_result(prod_res, truncate, error, max_rank, method, seed, options)
 
     def __mul__(
         self, other: Union[int, float, complex, "TensorTrain"]
@@ -293,6 +388,11 @@ class TensorTrain:
         self,
         other: "TensorTrain",
         truncate: bool = False,
+        error: Optional[float] = None,
+        max_rank: Optional[int] = None,
+        method: Literal["direct", "randomized"] = "direct",
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
     ) -> "TensorTrain":
         """Matrix product of two tensor trains.
 
@@ -310,11 +410,21 @@ class TensorTrain:
 
         Args:
             other: Tensor train to be multiplied;
-            truncate: If True, truncate resulting tensor train after multiplication (default=False).
+            truncate: If True, truncate resulting tensor train after multiplication (default=False);
+            error: Allowed error of that truncation, as in ``truncate()``
+                (default=0.0). Needs ``truncate=True``;
+            max_rank: Bound for the bond dimension of that truncation, as in
+                ``truncate()`` (default: no bound). Needs ``truncate=True``;
+            method: Method of that truncation, ``"direct"`` (default) or
+                ``"randomized"``, as in ``truncate()``. Needs ``truncate=True``;
+            seed: Seed of the ``"randomized"`` method, as in ``truncate()``;
+            options: Options of the ``"randomized"`` method, as in ``truncate()``.
 
         Raises:
             TypeError: If other is not TensorTrain type;
-            DimensionMismatch: If tensor trains have different physical dimensions.
+            DimensionMismatch: If tensor trains have different physical dimensions;
+            ValueError: If error, max_rank or method is given without
+                ``truncate=True``.
 
         Returns:
             TensorTrain: Matrix product of two tensor trains.
@@ -344,12 +454,9 @@ class TensorTrain:
             )
             prod_cores.append(core)
 
-        tt_matmul = TensorTrain(prod_cores)
-
-        if truncate:
-            tt_matmul.truncate(inplace=True)
-
-        return tt_matmul
+        return _round_result(
+            TensorTrain(prod_cores), truncate, error, max_rank, method, seed, options
+        )
 
     def __matmul__(self, other: "TensorTrain") -> "TensorTrain":
         """Matrix product operator."""
@@ -724,6 +831,9 @@ class TensorTrain:
         max_rank: Optional[int] = None,
         canonical: Literal["auto", "left", "right"] = "auto",
         inplace: bool = False,
+        method: Literal["direct", "randomized"] = "direct",
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
     ) -> "TensorTrain":
         """Round tensor train to minimal ranks.
 
@@ -740,10 +850,28 @@ class TensorTrain:
             error: Allowed error of truncation;
             max_rank: If given, set a bound for bond dimension;
             canonical: Type of final canonical form. If "auto" (default), direction will be chosen based on orth_center position.
-            inplace: If True, perform operation inplace (default=False).
+            inplace: If True, perform operation inplace (default=False);
+            method: ``"direct"`` (default) orthonormalizes the train with QR
+                decompositions before the SVD truncation. ``"randomized"``
+                replaces that orthonormalization by
+                :func:`ttnumpy.utils.left_randomized_orthonormalize` or its
+                mirror image, on a random sketch with bonds
+                ``max_rank + oversampling``; it needs ``max_rank``. With
+                ``"randomized"``, ``error`` bounds the SVD truncation only.
+                The error of the sketch is not bounded. It is at rounding
+                level when no unfolding of the train has rank above
+                ``max_rank + oversampling``;
+            seed: Seed of the random sketch, for reproducible results. Used
+                only by ``"randomized"``;
+            options: Options of the ``"randomized"`` method, used only by
+                it: ``{"oversampling": int}``, the number of bonds the sketch
+                has above ``max_rank`` (default=10).
 
         Raises:
-            ValueError: If canonical is not 'auto', 'left' or 'right'.
+            ValueError: If canonical is not 'auto', 'left' or 'right', if
+                method is not 'direct' or 'randomized', if 'randomized' is
+                given without max_rank, or if its options have an unknown key
+                or an oversampling that is not a non-negative integer.
 
         Returns:
             TensorTrain: Truncated tensor train.
@@ -753,6 +881,12 @@ class TensorTrain:
                 f"Canonical form must be 'left', 'right' or 'auto', "
                 f"but got {canonical}"
             )
+        if method not in ("direct", "randomized"):
+            raise ValueError(
+                f"Method must be 'direct' or 'randomized', but got {method!r}"
+            )
+        if method == "randomized":
+            sketch_rank = _sketch_rank(max_rank, options)
 
         tt_trunc = self if inplace else self.copy()
 
@@ -766,7 +900,16 @@ class TensorTrain:
                 orth_form = "left"
             else:
                 orth_form = "right"
-        tt_trunc.orthonormalize(canonical=orth_form, inplace=True)
+        if method == "direct":
+            tt_trunc.orthonormalize(canonical=orth_form, inplace=True)
+        else:
+            rng = np.random.default_rng(seed)
+            if orth_form == "left":
+                utils.left_randomized_orthonormalize(tt_trunc.cores, sketch_rank, rng)
+                tt_trunc.orth_center = tt_trunc.n_cores - 1
+            else:
+                utils.right_randomized_orthonormalize(tt_trunc.cores, sketch_rank, rng)
+                tt_trunc.orth_center = 0
         tt_trunc.compress_svd(error, max_rank, inplace=True)
 
         return tt_trunc

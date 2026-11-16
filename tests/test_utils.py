@@ -11,6 +11,7 @@ how the callers in :mod:`ttnumpy.tensor_train` use them. Tests therefore hand
 over ``list(tt.cores)`` and keep ``tt`` itself as the untouched reference.
 """
 
+import tracemalloc
 import unittest
 from unittest import mock
 
@@ -173,6 +174,289 @@ class TestOrthonormalize(unittest.TestCase):
             utils.right_orthonormalize(list(train.cores), 2, 0)
         )
         npt.assert_allclose(result.get_full_tensor(), reference, rtol=RTOL, atol=ATOL)
+
+
+def _doubled_trains():
+    """Name -> (train of bond 3, the same tensor doubled and stored with bond 6)."""
+    rng = np.random.default_rng(20)
+    vector = tensor_train.rand([2] * 6, ranks=3, seed=21)
+    operator = tensor_train.rand([(2, 3)] * 4, ranks=3, seed=22)
+    trains = {
+        "TT": vector,
+        "TTM": operator,
+        "complex": tensor_train.TensorTrain(
+            [
+                core * np.exp(2j * np.pi * rng.uniform(size=core.shape))
+                for core in vector.cores
+            ]
+        ),
+        "float32": tensor_train.TensorTrain(
+            [core.astype(np.float32) for core in vector.cores]
+        ),
+    }
+    return {name: (train, train.add(train)) for name, train in trains.items()}
+
+
+_RANDOMIZED_SWEEPS = (
+    utils.left_randomized_orthonormalize,
+    utils.right_randomized_orthonormalize,
+)
+
+
+class TestRandomizedOrthonormalize(unittest.TestCase):
+    """Sketched sweeps return an orthonormal train with bonds within the rank."""
+
+    def test_sweeps_recover_a_train_stored_with_larger_bonds(self):
+        """A sweep of rank 3 returns a tensor of TT ranks 3 stored with bonds 6."""
+        for name, (train, doubled) in _doubled_trains().items():
+            for sweep in _RANDOMIZED_SWEEPS:
+                with self.subTest(train=name, sweep=sweep.__name__):
+                    rtol = 1e-4 if name == "float32" else RTOL
+                    reference = 2 * train.get_full_tensor()
+
+                    cores = sweep(list(doubled.cores), 3, np.random.default_rng(0))
+                    result = tensor_train.TensorTrain(cores)
+
+                    self.assertLessEqual(result.max_rank, 3)
+                    self.assertEqual(cores[0].dtype, train.cores[0].dtype)
+                    npt.assert_allclose(
+                        result.get_full_tensor(),
+                        reference,
+                        rtol=rtol,
+                        atol=rtol * np.abs(reference).max(),
+                    )
+
+    def test_left_sweep_makes_every_core_but_the_last_left_orthonormal(self):
+        _, doubled = _doubled_trains()["complex"]
+        cores = utils.left_randomized_orthonormalize(
+            list(doubled.cores), 4, np.random.default_rng(1)
+        )
+
+        for index, core in enumerate(cores[:-1]):
+            with self.subTest(core=index):
+                matrix = core.reshape(-1, core.shape[3])
+                npt.assert_allclose(
+                    matrix.conj().T @ matrix,
+                    np.eye(core.shape[3]),
+                    rtol=RTOL,
+                    atol=ATOL,
+                )
+
+    def test_right_sweep_makes_every_core_but_the_first_right_orthonormal(self):
+        _, doubled = _doubled_trains()["complex"]
+        cores = utils.right_randomized_orthonormalize(
+            list(doubled.cores), 4, np.random.default_rng(2)
+        )
+
+        for index, core in enumerate(cores[1:], start=1):
+            with self.subTest(core=index):
+                matrix = core.reshape(core.shape[0], -1)
+                npt.assert_allclose(
+                    matrix @ matrix.conj().T,
+                    np.eye(core.shape[0]),
+                    rtol=RTOL,
+                    atol=ATOL,
+                )
+
+    def test_bonds_stay_within_the_full_rank_bound(self):
+        """A bond exceeds neither the rank nor the mode sizes on either side of it."""
+        _, doubled = _doubled_trains()["TT"]
+        for sweep in _RANDOMIZED_SWEEPS:
+            with self.subTest(sweep=sweep.__name__):
+                cores = sweep(list(doubled.cores), 5, np.random.default_rng(3))
+
+                self.assertEqual(
+                    tensor_train.TensorTrain(cores).bonds, [1, 2, 4, 5, 4, 2, 1]
+                )
+
+    def test_sweeps_below_the_rank_of_the_train_keep_its_largest_part(self):
+        """A sweep of rank 6 has under a tenth of the error of SVD rounding to rank 3.
+
+        The train has bonds up to 9 and decaying singular values.
+        """
+        grid = np.indices([3] * 8).sum(axis=0)
+        train = tensor_train.tt_svd(1.0 / (1.0 + grid), error=1e-14)
+        rounded = train.truncate(max_rank=3)
+        svd_error = rounded.add(train.multiply(-1)).tt_norm()
+        for sweep in _RANDOMIZED_SWEEPS:
+            with self.subTest(sweep=sweep.__name__):
+                result = tensor_train.TensorTrain(
+                    sweep(list(train.cores), 6, np.random.default_rng(7))
+                )
+
+                self.assertEqual(result.max_rank, 6)
+                error = result.add(train.multiply(-1)).tt_norm()
+                self.assertLess(error, 0.1 * svd_error)
+
+    def test_sweeps_keep_a_train_of_600_cores(self):
+        """A sweep of rank 16 returns a full-rank train of bond 16.
+
+        The sketch of core ``i`` is a product of ``600 - i`` random matrices
+        with entries of variance 1. It overflows unless each product is
+        rescaled.
+        """
+        rng = np.random.default_rng(30)
+        cores = [
+            rng.standard_normal(
+                (1 if index == 0 else 16, 2, 1, 1 if index == 599 else 16)
+            )
+            / np.sqrt(32)
+            for index in range(600)
+        ]
+        train = tensor_train.TensorTrain(utils.right_orthonormalize(cores, 599, 0))
+        for sweep in _RANDOMIZED_SWEEPS:
+            with self.subTest(sweep=sweep.__name__):
+                result = tensor_train.TensorTrain(
+                    sweep(list(train.cores), 16, np.random.default_rng(6))
+                )
+
+                difference = result.add(train.multiply(-1)).tt_norm()
+                self.assertLess(difference, 1e-10 * train.tt_norm())
+
+    def test_equal_generators_give_equal_cores(self):
+        _, doubled = _doubled_trains()["TT"]
+        for sweep in _RANDOMIZED_SWEEPS:
+            with self.subTest(sweep=sweep.__name__):
+                first = sweep(list(doubled.cores), 4, np.random.default_rng(4))
+                second = sweep(list(doubled.cores), 4, np.random.default_rng(4))
+
+                for one, other in zip(first, second):
+                    npt.assert_array_equal(one, other)
+
+    def test_sweeps_reject_a_non_positive_rank(self):
+        _, doubled = _doubled_trains()["TT"]
+        for sweep in _RANDOMIZED_SWEEPS:
+            with self.subTest(sweep=sweep.__name__):
+                with self.assertRaisesRegex(ValueError, "rank must be positive"):
+                    sweep(list(doubled.cores), 0, np.random.default_rng(5))
+
+
+def _hadamard_pairs():
+    """Name -> two trains with equal modes, bonds 3 and 2."""
+    rng = np.random.default_rng(40)
+    vector = tensor_train.rand([2] * 6, ranks=3, seed=41)
+    return {
+        "TT": (vector, tensor_train.rand([2] * 6, ranks=2, seed=42)),
+        "TTM": (
+            tensor_train.rand([(2, 3)] * 4, ranks=3, seed=43),
+            tensor_train.rand([(2, 3)] * 4, ranks=2, seed=44),
+        ),
+        "complex": (
+            tensor_train.TensorTrain(
+                [
+                    core * np.exp(2j * np.pi * rng.uniform(size=core.shape))
+                    for core in vector.cores
+                ]
+            ),
+            tensor_train.rand([2] * 6, ranks=2, seed=45),
+        ),
+    }
+
+
+class TestRandomizedHadamard(unittest.TestCase):
+    """The sketched sweep of an element-wise product, read from its two factors."""
+
+    def test_equals_the_left_sweep_of_the_built_product(self):
+        """Rank 3 is below the bonds of the product, which are up to 6."""
+        for name, (lhs, rhs) in _hadamard_pairs().items():
+            with self.subTest(trains=name):
+                built = utils.left_randomized_orthonormalize(
+                    list(lhs.multiply(rhs).cores), 3, np.random.default_rng(0)
+                )
+                expected = tensor_train.TensorTrain(built).get_full_tensor()
+
+                cores = utils.randomized_hadamard(
+                    lhs.cores, rhs.cores, 3, np.random.default_rng(0)
+                )
+
+                self.assertEqual(cores[0].dtype, built[0].dtype)
+                npt.assert_allclose(
+                    tensor_train.TensorTrain(cores).get_full_tensor(),
+                    expected,
+                    rtol=RTOL,
+                    atol=RTOL * np.abs(expected).max(),
+                )
+
+    def test_rank_of_the_product_gives_the_product(self):
+        for name, (lhs, rhs) in _hadamard_pairs().items():
+            with self.subTest(trains=name):
+                expected = lhs.get_full_tensor() * rhs.get_full_tensor()
+
+                cores = utils.randomized_hadamard(
+                    lhs.cores, rhs.cores, 6, np.random.default_rng(1)
+                )
+
+                npt.assert_allclose(
+                    tensor_train.TensorTrain(cores).get_full_tensor(),
+                    expected,
+                    rtol=RTOL,
+                    atol=RTOL * np.abs(expected).max(),
+                )
+
+    def test_every_core_but_the_last_is_left_orthonormal(self):
+        lhs, rhs = _hadamard_pairs()["complex"]
+        cores = utils.randomized_hadamard(
+            lhs.cores, rhs.cores, 4, np.random.default_rng(2)
+        )
+
+        for index, core in enumerate(cores[:-1]):
+            with self.subTest(core=index):
+                matrix = core.reshape(-1, core.shape[3])
+                npt.assert_allclose(
+                    matrix.conj().T @ matrix,
+                    np.eye(core.shape[3]),
+                    rtol=RTOL,
+                    atol=ATOL,
+                )
+
+    def test_peak_memory_is_below_one_core_of_the_product(self):
+        """Factors of bond 32 have a product with cores of 2 * 1024**2 entries."""
+        lhs = tensor_train.rand([2] * 12, ranks=32, seed=46)
+        rhs = tensor_train.rand([2] * 12, ranks=32, seed=47)
+        product_core = 8 * 2 * 1024**2
+
+        tracemalloc.start()
+        utils.randomized_hadamard(lhs.cores, rhs.cores, 8, np.random.default_rng(3))
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        self.assertLess(peak, product_core / 4)
+
+    def test_keeps_a_product_of_800_cores(self):
+        """A sweep of rank 16 returns the product of two factors of bond 4.
+
+        The sketch of core ``i`` is a product of ``800 - i`` random matrices
+        with entries of variance 1. It overflows unless each product is
+        rescaled.
+        """
+        factors = []
+        for seed in (48, 49):
+            rng = np.random.default_rng(seed)
+            cores = [
+                rng.standard_normal(
+                    (1 if index == 0 else 4, 2, 1, 1 if index == 799 else 4)
+                )
+                / np.sqrt(8)
+                for index in range(800)
+            ]
+            factors.append(
+                tensor_train.TensorTrain(utils.right_orthonormalize(cores, 799, 0))
+            )
+        product = factors[0].multiply(factors[1])
+
+        result = tensor_train.TensorTrain(
+            utils.randomized_hadamard(
+                factors[0].cores, factors[1].cores, 16, np.random.default_rng(4)
+            )
+        )
+
+        difference = result.add(product.multiply(-1)).tt_norm()
+        self.assertLess(difference, 1e-10 * product.tt_norm())
+
+    def test_rejects_a_non_positive_rank(self):
+        lhs, rhs = _hadamard_pairs()["TT"]
+        with self.assertRaisesRegex(ValueError, "rank must be positive"):
+            utils.randomized_hadamard(lhs.cores, rhs.cores, 0, np.random.default_rng(5))
 
 
 class TestSvdSweeps(unittest.TestCase):

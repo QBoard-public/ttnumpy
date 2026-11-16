@@ -265,6 +265,73 @@ and the margin it needs grows with the chain: for ``sin(10x)`` sampled in
 ``float32`` the ranks are exact at ``1e-5`` on :math:`2^{16}` points and at
 ``1e-4`` on :math:`2^{24}`.
 
+Randomized rounding
+~~~~~~~~~~~~~~~~~~~
+
+The QR sweep of step 1 costs :math:`O(d \, n \, r^3)` in the bonds :math:`r`
+the train is stored with, however small the bonds of the result are.
+``method="randomized"`` replaces it by the Randomize-then-Orthogonalize sweep
+of [AlDaas2023]_. The train is contracted with a random tensor train of bonds
+:math:`\ell`, where :math:`\ell` is ``max_rank`` plus an oversampling of 10.
+Each core is then orthonormalized on that contraction, which costs
+:math:`O(d \, n \, r^2 \ell)`. The SVD sweep of step 2 follows on a train of
+bonds :math:`\ell` and costs :math:`O(d \, n \, \ell^3)`.
+
+.. code-block:: python
+
+   x = tt.rand([4] * 5, ranks=2, seed=7)
+   inflated = x + x + x
+
+   rounded = inflated.truncate(error=1e-12, max_rank=4, method="randomized", seed=0)
+   print(rounded.bonds)             # [1, 2, 2, 2, 2, 1]
+
+Three things differ from the default ``method="direct"``:
+
+- ``max_rank`` is required, because it sets the bonds of the sketch.
+- The result depends on the random train. ``seed`` makes it reproducible.
+- ``error`` bounds the SVD sweep only. The sketch adds an error of its own,
+  which has no bound. It is at rounding level when no unfolding of the train
+  has rank above :math:`\ell`.
+
+``options={"oversampling": p}`` changes the oversampling. ``seed`` and
+``options`` are used only by ``"randomized"``; ``"direct"`` ignores them. The
+methods ``add``, ``multiply`` and ``dot`` take the same ``method``, ``seed``
+and ``options`` together with ``truncate=True``.
+
+``add`` and ``dot`` build the exact result first and round it as above.
+``multiply`` of two trains does not build the product. Its cores are the
+products of the cores of ``x`` and ``y``, with bonds :math:`r s` for bonds
+:math:`r` of ``x`` and :math:`s` of ``y``. Building them costs
+:math:`O(d \, n \, r^2 s^2)` in time and memory. Rounding them with
+``"direct"`` costs :math:`O(d \, n \, r^3 s^3)`. The HaTT-1 algorithm of
+[Sun2025]_ runs the same sweep and contracts with one core of ``x`` and one
+core of ``y`` in turn, which costs :math:`O(d \, n \, r s \, \ell \,
+(r + s + \ell))`. The SVD sweep adds :math:`O(d \, n \, \ell^3)`.
+
+.. code-block:: python
+
+   x = tt.rand([2] * 12, ranks=20, seed=1)
+   y = tt.rand([2] * 12, ranks=20, seed=2)
+
+   z = x.multiply(y, truncate=True, max_rank=30, method="randomized", seed=0)
+   print(z.max_rank)                # 30
+
+Which method to use:
+
+- ``"randomized"`` for ``multiply`` of two trains. The product is not built,
+  so the saving grows with the bonds.
+- ``"randomized"`` to round a sum or an operator product whose bonds are
+  several times ``max_rank``.
+- ``"direct"`` when the bonds are already close to ``max_rank``. The sketch
+  is then about as large as the train, so it only adds work.
+- ``"direct"`` when no bound for the bonds is known, or when the result has
+  to meet ``error``. Only ``"direct"`` guarantees it.
+
+When the result fits the sketch, both methods give the same error. When
+``max_rank`` cuts the result, the error of ``"randomized"`` is larger than
+that of ``"direct"`` and changes with the seed. A larger oversampling brings
+it closer.
+
 Any tensor can be truncated
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -460,8 +527,9 @@ Operators and methods
 
 The operators are shorthand for the methods. No arithmetic operation rounds
 by default: the result holds the exact sum or product, with the ranks below.
-``truncate()`` on the result compresses it, and ``truncate=True`` on a
-method does the same in one call.
+``truncate()`` on the result compresses it. ``truncate=True`` on a method
+does the same in one call and takes the same ``error`` and ``max_rank``, as
+in ``x.multiply(y, truncate=True, error=1e-6, max_rank=8)``.
 
 ==============  ==========================  =============================
 Operator        Method                      Ranks of the result
@@ -659,6 +727,15 @@ sweep overhead measurably dominates.
 
 References
 ----------
+
+.. [AlDaas2023] H. Al Daas, G. Ballard, P. Cazeaux, E. Hallman, A. Międlar,
+   M. Pasha, T. W. Reid, A. K. Saibaba, *Randomized algorithms for rounding
+   in the tensor-train format*, SIAM J. Sci. Comput. 45(1), A74–A95, 2023.
+   https://doi.org/10.1137/21M1451191
+
+.. [Sun2025] Z. Sun, J. Huang, C. Xiao, C. Yang, *HaTT: Hadamard avoiding TT
+   recompression and its applications*, arXiv:2410.04385, 2025.
+   https://arxiv.org/abs/2410.04385
 
 .. [Oseledets2010] I. V. Oseledets, *Approximation of* :math:`2^d \times
    2^d` *matrices using tensor decomposition*, SIAM J. Matrix Anal. Appl.
