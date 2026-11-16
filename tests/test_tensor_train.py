@@ -6,11 +6,13 @@
 import math
 import unittest
 import warnings
+from unittest import mock
 
 import numpy as np
 import numpy.testing as npt
 
 from ttnumpy import tensor_train
+from ttnumpy import utils
 from ttnumpy.logger_config import PACKAGE_LOGGER_NAME
 
 TEST_DELTA = 1e-10
@@ -1427,6 +1429,39 @@ class TestTTArithmeticContracts(unittest.TestCase):
         )
         self.assertLessEqual(max(truncated.bonds), max(exact.bonds))
 
+    def _rounding_cases(self):
+        lhs = tensor_train.rand(physical_indexes=[2] * 6, ranks=3, seed=21)
+        rhs = tensor_train.rand(physical_indexes=[2] * 6, ranks=3, seed=22)
+        operator = tensor_train.rand(physical_indexes=[(2, 2)] * 6, ranks=2, seed=23)
+        return (
+            ("add", lhs.add, rhs),
+            ("multiply", lhs.multiply, rhs),
+            ("dot", operator.dot, lhs),
+        )
+
+    def test_truncate_takes_error_and_max_rank(self):
+        """``truncate=True`` rounds as ``truncate(error, max_rank)`` of the exact result."""
+        for name, method, operand in self._rounding_cases():
+            for rounding in ({"error": 1e-2}, {"max_rank": 2}):
+                with self.subTest(method=name, rounding=rounding):
+                    expected = method(operand).truncate(**rounding)
+
+                    result = method(operand, truncate=True, **rounding)
+
+                    self.assertEqual(result.bonds, expected.bonds)
+                    npt.assert_allclose(
+                        result.get_full_tensor(),
+                        expected.get_full_tensor(),
+                        rtol=1e-12,
+                    )
+
+    def test_error_and_max_rank_need_truncate(self):
+        for name, method, operand in self._rounding_cases():
+            for rounding in ({"error": 1e-2}, {"max_rank": 2}):
+                with self.subTest(method=name, rounding=rounding):
+                    with self.assertRaisesRegex(ValueError, "truncate=True"):
+                        method(operand, **rounding)
+
     def test_add_rejects_a_non_tensor_train(self):
         for operand in (1.0, "tt", [1, 2]):
             with self.subTest(operand=type(operand).__name__):
@@ -1440,6 +1475,185 @@ class TestTTArithmeticContracts(unittest.TestCase):
     def test_dot_rejects_a_non_tensor_train(self):
         with self.assertRaises(TypeError):
             self.lhs.dot(2.0)
+
+
+class TestTTRandomizedTruncate(unittest.TestCase):
+    """``method="randomized"`` of ``truncate`` and of the arithmetic methods."""
+
+    def setUp(self):
+        grid = np.indices([3] * 8).sum(axis=0)
+        # bonds up to 9, decaying singular values
+        self.decaying = tensor_train.tt_svd(1.0 / (1.0 + grid), error=1e-14)
+        self.low_rank = tensor_train.rand(physical_indexes=[2] * 8, ranks=3, seed=31)
+        # the same tensor times three, stored with bonds 9
+        self.inflated = self.low_rank.add(self.low_rank).add(self.low_rank)
+
+    def _error(self, result, reference):
+        return result.add(reference.multiply(-1)).tt_norm() / reference.tt_norm()
+
+    def test_finds_the_rank_of_a_train_stored_with_larger_bonds(self):
+        """A sketch of bond 4 and the SVD sweep after it return the bonds of ``"direct"``."""
+        result = self.inflated.truncate(
+            error=1e-10,
+            max_rank=4,
+            method="randomized",
+            seed=0,
+            options={"oversampling": 0},
+        )
+
+        self.assertEqual(result.bonds, self.inflated.truncate(error=1e-10).bonds)
+        self.assertLess(self._error(result, self.inflated), 1e-10)
+
+    def test_error_under_a_binding_cap_is_close_to_the_direct_one(self):
+        """With a sketch of bond 6, the error at bond 3 is within 1.1 of the direct one."""
+        direct = self.decaying.truncate(max_rank=3)
+
+        result = self.decaying.truncate(
+            max_rank=3, method="randomized", seed=1, options={"oversampling": 3}
+        )
+
+        self.assertEqual(result.bonds, direct.bonds)
+        self.assertLess(
+            self._error(result, self.decaying),
+            1.1 * self._error(direct, self.decaying),
+        )
+
+    def test_sketch_bond_is_max_rank_plus_oversampling(self):
+        for options, expected in ((None, 13), ({"oversampling": 2}, 5)):
+            with self.subTest(options=options):
+                with mock.patch.object(
+                    utils,
+                    "left_randomized_orthonormalize",
+                    wraps=utils.left_randomized_orthonormalize,
+                ) as sweep:
+                    self.decaying.truncate(
+                        max_rank=3, method="randomized", seed=2, options=options
+                    )
+
+                self.assertEqual(sweep.call_args.args[1], expected)
+
+    def test_equal_seeds_give_equal_cores(self):
+        rounding = {
+            "max_rank": 3,
+            "method": "randomized",
+            "options": {"oversampling": 1},
+        }
+        first = self.decaying.truncate(seed=3, **rounding)
+        second = self.decaying.truncate(seed=3, **rounding)
+        other = self.decaying.truncate(seed=4, **rounding)
+
+        for one, same in zip(first.cores, second.cores):
+            npt.assert_array_equal(one, same)
+        self.assertFalse(np.array_equal(first.cores[-1], other.cores[-1]))
+
+    def test_receiver_changes_only_with_inplace(self):
+        reference = self.inflated.copy()
+        rounding = {"max_rank": 3, "method": "randomized", "seed": 5}
+
+        self.inflated.truncate(**rounding)
+        self.assertEqual(self.inflated.bonds, reference.bonds)
+        for core, original in zip(self.inflated.cores, reference.cores):
+            npt.assert_array_equal(core, original)
+
+        self.assertIs(self.inflated.truncate(inplace=True, **rounding), self.inflated)
+        self.assertEqual(self.inflated.max_rank, 3)
+
+    def test_canonical_form_of_the_result_is_that_of_the_direct_method(self):
+        centred = self.inflated.orthonormalize(canonical="mix", center_position=1)
+        for name, train in (("no centre", self.inflated), ("centre 1", centred)):
+            for canonical in ("auto", "left", "right"):
+                with self.subTest(train=name, canonical=canonical):
+                    direct = train.truncate(max_rank=3, canonical=canonical)
+
+                    result = train.truncate(
+                        max_rank=3, canonical=canonical, method="randomized", seed=6
+                    )
+
+                    self.assertEqual(result.orth_center, direct.orth_center)
+                    self.assertEqual(result.bonds, direct.bonds)
+                    self.assertLess(self._error(result, train), 1e-10)
+
+    def test_rejects_arguments_that_do_not_fit_the_method(self):
+        for name, arguments, message in (
+            ("unknown method", {"method": "fast", "max_rank": 3}, "Method must be"),
+            ("no max_rank", {"method": "randomized"}, "needs max_rank"),
+            (
+                "unknown option",
+                {"method": "randomized", "max_rank": 3, "options": {"rank": 2}},
+                "Unknown options",
+            ),
+            (
+                "negative oversampling",
+                {
+                    "method": "randomized",
+                    "max_rank": 3,
+                    "options": {"oversampling": -1},
+                },
+                "non-negative integer",
+            ),
+        ):
+            with self.subTest(case=name):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.decaying.truncate(**arguments)
+
+    def test_direct_ignores_seed_and_options(self):
+        expected = self.decaying.truncate(max_rank=3)
+
+        result = self.decaying.truncate(max_rank=3, seed=1, options={"rank": 2})
+
+        for core, same in zip(result.cores, expected.cores):
+            npt.assert_array_equal(core, same)
+        unrounded = self.low_rank.add(self.low_rank, seed=1, options={})
+        self.assertEqual(unrounded.bonds, self.low_rank.add(self.low_rank).bonds)
+
+    def test_arithmetic_methods_forward_the_method(self):
+        """``add``, ``multiply`` and ``dot`` round as ``truncate`` of the exact result."""
+        lhs = self.low_rank
+        rhs = tensor_train.rand(physical_indexes=[2] * 8, ranks=4, seed=32)
+        operator = tensor_train.rand(physical_indexes=[(2, 2)] * 8, ranks=2, seed=33)
+        # a sketch of bond 5 is below the bonds 7, 12 and 6 of the exact
+        # results, so the rounded results depend on the seed
+        rounding = {
+            "error": 0.3,
+            "max_rank": 5,
+            "method": "randomized",
+            "seed": 7,
+            "options": {"oversampling": 0},
+        }
+        for name, method, operand in (
+            ("add", lhs.add, rhs),
+            ("multiply", lhs.multiply, rhs),
+            ("dot", operator.dot, lhs),
+        ):
+            with self.subTest(method=name):
+                expected = method(operand).truncate(**rounding)
+
+                result = method(operand, truncate=True, **rounding)
+
+                self.assertEqual(result.bonds, expected.bonds)
+                self.assertEqual(result.orth_center, expected.orth_center)
+                self.assertLess(self._error(result, expected), 1e-10)
+                with self.assertRaisesRegex(ValueError, "truncate=True"):
+                    method(operand, method="randomized")
+
+    def test_multiply_takes_the_cores_from_the_sketched_product(self):
+        """The product is not built: the cores come from ``randomized_hadamard``."""
+        rhs = tensor_train.rand(physical_indexes=[2] * 8, ranks=4, seed=34)
+        with mock.patch.object(
+            utils, "randomized_hadamard", wraps=utils.randomized_hadamard
+        ) as sweep:
+            result = self.low_rank.multiply(
+                rhs,
+                truncate=True,
+                max_rank=3,
+                method="randomized",
+                options={"oversampling": 2},
+            )
+
+        self.assertEqual(sweep.call_args.args[2], 5)
+        self.assertEqual(result.max_rank, 3)
+        with self.assertRaisesRegex(ValueError, "needs max_rank"):
+            self.low_rank.multiply(rhs, truncate=True, method="randomized")
 
 
 class TestTTInspection(unittest.TestCase):

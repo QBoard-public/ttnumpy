@@ -12,6 +12,29 @@ minor release may change the API.
 - `TensorTrain.matricize`: the entries of a TT as a vector, of a TTM as a
   matrix with the row modes as rows and the column modes as columns. It works
   for any number of cores when the result fits in memory.
+- `TensorTrain.add`, `multiply` and `dot` take `error` and `max_rank` together
+  with `truncate=True` and round the result with them, as `truncate(error,
+  max_rank)` does. Given without `truncate=True`, they raise `ValueError`.
+- `TensorTrain.truncate` takes `method="randomized"` with `seed` and `options`.
+  It orthonormalizes the train on a random sketch with bonds `max_rank` plus an
+  oversampling of 10, then truncates with the SVD sweep as before. It needs
+  `max_rank`, and `error` bounds the SVD sweep only. `add`, `multiply` and
+  `dot` take the same arguments together with `truncate=True`. On trains of
+  18 binary cores with bonds 96–685, rounded to bonds 32–80, it takes 9–60%
+  less time than `"direct"`. The error is 1.0–1.3 times that of `"direct"` in
+  the median over 20 seeds and at most 2.6 times. On trains with bonds close
+  to `max_rank + 10` (24 for 22, 48 for 42) it takes 30–38% more time.
+- `utils.left_randomized_orthonormalize` and
+  `utils.right_randomized_orthonormalize`: the sweeps behind the randomized
+  method.
+- `TensorTrain.multiply` of two tensor trains with `truncate=True` and
+  `method="randomized"` no longer builds the product with bonds `r * s`. It
+  takes the left-orthonormal cores from the new `utils.randomized_hadamard`,
+  the HaTT-1 algorithm of Sun, Huang, Xiao and Yang (arXiv:2410.04385). For
+  factors with bonds 16–64 on 18 binary cores, rounded to bonds 32–64, it
+  takes 80–91% less time than building the product and rounding it with
+  `"direct"`. The error is 1.05–1.42 times that of `"direct"` in the median
+  over 20 seeds and at most 1.7 times.
 
 ### Changed
 

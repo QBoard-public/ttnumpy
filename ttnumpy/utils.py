@@ -136,6 +136,203 @@ def right_orthonormalize(
     return cores
 
 
+def left_randomized_orthonormalize(
+    cores: List[np.ndarray], rank: int, rng: np.random.Generator
+) -> List[np.ndarray]:
+    """Left orthonormalize tensor train cores on a random sketch of the train.
+
+    Randomize-then-Orthogonalize of Al Daas et al., SIAM J. Sci. Comput. 45
+    (2023), A74-A95. The train is contracted from the right with a random
+    tensor train of bonds at most ``rank``. Each core but the last is
+    then replaced by the orthonormal factor of a QR factorization of its
+    unfolding times that contraction. The last core takes the remainder.
+
+    The result is the orthogonal projection of the train onto the span of the
+    new left-orthonormal cores, with bonds at most ``rank``. When no unfolding
+    of the train has rank above ``rank``, it equals the train with a rounding
+    error that grows with the number of cores; otherwise its distance to the
+    train has no bound.
+
+    For ``d`` cores with bonds ``r`` and ``n`` entries per physical index, the
+    cost is ``O(d n r^2 l)`` with ``l = rank``. :func:`left_orthonormalize`
+    costs ``O(d n r^3)``.
+
+    Args:
+        cores: Tensor train cores.
+        rank: Bound for the bonds of the result.
+        rng: Generator the random tensor train is drawn from.
+
+    Raises:
+        ValueError: If ``rank`` is not positive.
+
+    Returns:
+        Left-orthonormal tensor train cores.
+    """
+    if rank < 1:
+        raise ValueError(f"rank must be positive, but got {rank}")
+    count = len(cores)
+    real = np.finfo(np.result_type(*cores, np.float32)).dtype
+
+    # sketches[i]: the cores from i on, contracted with the random train
+    sketches = [None] * count + [np.ones((1, 1), dtype=real)]
+    for i in range(count - 1, 0, -1):
+        contracted = _multiply_right(cores[i], sketches[i + 1])
+        contracted = contracted.reshape(contracted.shape[0], -1)
+        bond = min(rank, *contracted.shape)
+        random_core = rng.standard_normal((contracted.shape[1], bond), dtype=real)
+        sketches[i] = contracted @ random_core
+        scale = np.abs(sketches[i]).max()
+        if scale > 0:
+            sketches[i] /= scale
+
+    for i in range(count - 1):
+        shape = cores[i].shape
+        matrix = cores[i].reshape((shape[0] * shape[1] * shape[2], shape[3]))
+        Q, _ = qr(matrix @ sketches[i + 1], mode="economic")
+        cores[i] = Q.reshape((shape[0], shape[1], shape[2], -1))
+        cores[i + 1] = _multiply_left(Q.conj().T @ matrix, cores[i + 1])
+    return cores
+
+
+def right_randomized_orthonormalize(
+    cores: List[np.ndarray], rank: int, rng: np.random.Generator
+) -> List[np.ndarray]:
+    """Right orthonormalize tensor train cores on a random sketch of the train.
+
+    Mirror image of :func:`left_randomized_orthonormalize`: the train is
+    contracted from the left, the cores are replaced from the last to the
+    second and the first core takes the remainder.
+
+    Args:
+        cores: Tensor train cores.
+        rank: Bound for the bonds of the result.
+        rng: Generator the random tensor train is drawn from.
+
+    Raises:
+        ValueError: If ``rank`` is not positive.
+
+    Returns:
+        Right-orthonormal tensor train cores.
+    """
+    mirrored = [core.transpose(3, 1, 2, 0) for core in reversed(cores)]
+    mirrored = left_randomized_orthonormalize(mirrored, rank, rng)
+    cores[:] = [
+        np.ascontiguousarray(core.transpose(3, 1, 2, 0)) for core in reversed(mirrored)
+    ]
+    return cores
+
+
+def _hadamard_times_sketch(
+    lhs: np.ndarray, rhs: np.ndarray, sketch: np.ndarray
+) -> np.ndarray:
+    """Contract a core of an element-wise product with ``sketch`` on its right bond.
+
+    The cores of the two factors have shapes (r, m, n, r') and (s, m, n, s'),
+    ``sketch`` has (r', s', l). The result has shape (r * s, m * n * l). The
+    core of the product, of shape (r * s, m, n, r' * s'), is not formed.
+    """
+    bond, modes, next_bond = lhs.shape[0], lhs.shape[1] * lhs.shape[2], lhs.shape[3]
+    half = lhs.reshape(-1, next_bond) @ sketch.reshape(next_bond, -1)
+    half = half.reshape(bond, modes, rhs.shape[3], -1).transpose(1, 0, 3, 2)
+    half = half.reshape(modes, -1, rhs.shape[3])
+    full = half @ rhs.reshape(rhs.shape[0], modes, -1).transpose(1, 2, 0)
+    full = full.reshape(modes, bond, -1, rhs.shape[0]).transpose(1, 3, 0, 2)
+    return full.reshape(bond * rhs.shape[0], -1)
+
+
+def _carry_times_hadamard(
+    carry: np.ndarray, lhs: np.ndarray, rhs: np.ndarray
+) -> np.ndarray:
+    """Contract ``carry`` with a core of an element-wise product on its left bond.
+
+    ``carry`` has shape (l, r, s), the cores of the two factors have
+    (r, m, n, r') and (s, m, n, s'). The result has shape
+    (l * m * n, r' * s'). The core of the product, of shape
+    (r * s, m, n, r' * s'), is not formed.
+    """
+    rank, bond, modes = carry.shape[0], lhs.shape[0], lhs.shape[1] * lhs.shape[2]
+    half = carry.transpose(0, 2, 1).reshape(-1, bond) @ lhs.reshape(bond, -1)
+    half = half.reshape(rank, rhs.shape[0], modes, -1).transpose(2, 0, 3, 1)
+    half = half.reshape(modes, -1, rhs.shape[0])
+    full = half @ rhs.reshape(rhs.shape[0], modes, -1).transpose(1, 0, 2)
+    full = full.reshape(modes, rank, lhs.shape[3], -1).transpose(1, 0, 2, 3)
+    return full.reshape(rank * modes, -1)
+
+
+def randomized_hadamard(
+    lhs_cores: List[np.ndarray],
+    rhs_cores: List[np.ndarray],
+    rank: int,
+    rng: np.random.Generator,
+) -> List[np.ndarray]:
+    """Left-orthonormal cores of the element-wise product of two tensor trains.
+
+    HaTT-1 of Sun, Huang, Xiao and Yang, arXiv:2410.04385. It is
+    :func:`left_randomized_orthonormalize` of the train whose cores are the
+    products of the cores of the two trains, with bonds the products of their
+    bonds. Those cores are not formed: each contraction with them is a
+    contraction with one core of each train.
+
+    The result is the orthogonal projection of the product onto the span of
+    the returned left-orthonormal cores, with bonds at most ``rank``. When no
+    unfolding of the product has rank above ``rank``, it equals the product
+    with a rounding error that grows with the number of cores; otherwise its
+    distance to the product has no bound.
+
+    For ``d`` cores with bonds ``r`` and ``s`` in the two trains and ``n``
+    entries per physical index, the cost is ``O(d n r s l (r + s + l))`` with
+    ``l = rank``. A core of the product holds ``O(n r^2 s^2)`` numbers.
+
+    Args:
+        lhs_cores: Cores of the first tensor train.
+        rhs_cores: Cores of the second tensor train, with the modes of the
+            first.
+        rank: Bound for the bonds of the result.
+        rng: Generator the random tensor train is drawn from.
+
+    Raises:
+        ValueError: If ``rank`` is not positive.
+
+    Returns:
+        Left-orthonormal tensor train cores.
+    """
+    if rank < 1:
+        raise ValueError(f"rank must be positive, but got {rank}")
+    count = len(lhs_cores)
+    real = np.finfo(np.result_type(*lhs_cores, *rhs_cores, np.float32)).dtype
+
+    # sketches[i]: the product cores from i on, contracted with the random train
+    sketches = [None] * count + [np.ones((1, 1, 1), dtype=real)]
+    for i in range(count - 1, 0, -1):
+        contracted = _hadamard_times_sketch(lhs_cores[i], rhs_cores[i], sketches[i + 1])
+        bond = min(rank, *contracted.shape)
+        random_core = rng.standard_normal((contracted.shape[1], bond), dtype=real)
+        sketch = contracted @ random_core
+        scale = np.abs(sketch).max()
+        if scale > 0:
+            sketch /= scale
+        sketches[i] = sketch.reshape(lhs_cores[i].shape[0], rhs_cores[i].shape[0], bond)
+
+    cores = []
+    # carry: the new cores before i, conjugated, contracted with the product
+    # cores before i
+    carry = np.ones((1, 1, 1), dtype=real)
+    for i in range(count):
+        shape = (carry.shape[0],) + lhs_cores[i].shape[1:3] + (-1,)
+        matrix = _carry_times_hadamard(carry, lhs_cores[i], rhs_cores[i])
+        if i == count - 1:
+            cores.append(matrix.reshape(shape))
+            break
+        Q, _ = qr(
+            matrix @ sketches[i + 1].reshape(matrix.shape[1], -1), mode="economic"
+        )
+        cores.append(Q.reshape(shape))
+        carry = (Q.conj().T @ matrix).reshape(
+            Q.shape[1], lhs_cores[i].shape[3], rhs_cores[i].shape[3]
+        )
+    return cores
+
+
 def _svd_with_fallback(
     matrix: np.ndarray, core: int
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
