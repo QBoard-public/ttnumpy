@@ -5,7 +5,7 @@ All notable changes to TTNumPy are listed here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0.0 a
 minor release may change the API.
 
-## [Unreleased]
+## [0.3.0] - 2026-11-18
 
 ### Added
 
@@ -35,6 +35,12 @@ minor release may change the API.
   takes 80–91% less time than building the product and rounding it with
   `"direct"`. The error is 1.05–1.42 times that of `"direct"` in the median
   over 20 seeds and at most 1.7 times.
+- `benchmarks.arithmetic`: a benchmark of the arithmetic of tensor trains. Its
+  accuracy table compares products, sums, an operator applied to a vector and
+  a polynomial of a vector on QTT vectors of up to $2^{40}$ entries with
+  NumPy: memory of both forms, error of the train. Its speed table times the
+  direct and the randomized rounding on the same workloads. It writes
+  Markdown and JSON reports like the Poisson benchmark.
 
 ### Changed
 
@@ -50,12 +56,40 @@ minor release may change the API.
   `truncate` with the orthogonality centre in the left half, `tt_norm` of a
   train without one, `tt_to_qtt` and the solvers, whose results differ within
   the solver tolerance.
+- AMEn computes the cores of its residual train with three matrix products
+  instead of one `numpy.einsum` call. When the solution bond was between about
+  the operator bond and twice it, `einsum` ran one loop over all eight indices.
+  A sweep of AMEn takes 33–44% less time on the 2D Poisson problem of the
+  benchmarks (operator bond 6, grids from 128 × 128 to 512 × 512) and 52–88%
+  less on QTT finite-element systems with operator bonds 8–63. Solutions
+  differ within the solver tolerance, which can change the number of sweeps
+  by one.
 
 ### Fixed
 
 - `TensorTrain.transpose` no longer marks a train as a TTM when every column
   mode stays 1, as in `x.transpose(cores_ind=[])`. The type now follows the
   rule of the constructor, so it no longer changes on `copy()`.
+- `TensorTrain.truncate` on a train of two cores now rounds as on longer
+  trains. Its SVD sweep started at the core away from the orthogonality
+  centre: `error` removed no bond, while `max_rank` gave errors up to 15 times
+  the smallest possible one. The same held for `add`, `multiply` and `dot`
+  with `truncate=True`, for `method="randomized"` and for `qtt_to_tt` with two
+  groups. `compress_svd(canonical="auto")` now starts its sweep at the end
+  nearer to `orth_center`. Results change only for trains of two cores, which
+  now end with the centre on the first core as longer trains do, and for
+  `compress_svd` on an even number of cores with `orth_center` in the middle.
+- A NumPy scalar on the left of a train, as in `np.float64(2.0) * train`, now
+  scales the train like a Python scalar. NumPy used to take over the operator
+  and raise `ValueError`. For a train of rank 1 with equal modes it returned
+  an array of the scaled cores. Other operators with a NumPy object on the
+  left, such as `np.float64(2.0) + train`, raise `TypeError` instead of
+  `ValueError`.
+- `TensorTrain.qtt_to_tt` merges a group of 32 or more QTT cores into one
+  core. It raised `ValueError` on NumPy's limit of 64 axes, which a group that
+  fits in memory reaches only with modes of size 1. The group is now
+  contracted as a matrix, as `matricize` does. Results of the groupings that
+  worked before are unchanged.
 
 ## [0.2.1] - 2026-11-05
 

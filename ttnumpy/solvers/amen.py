@@ -138,16 +138,25 @@ def residual_core(
     )
     if x_core is None:
         x_core = x.cores[ind][:, :, 0, :]
-    # A x projected onto z's frame
-    ax_part = np.einsum(
-        "iaj,aklb,ilm,mbn->jkn",
-        left_env_zAx[ind],
-        A.cores[ind],
-        x_core,
-        right_env_zAx[ind],
-        optimize="optimal",
+
+    left, core, right = left_env_zAx[ind], A.cores[ind], right_env_zAx[ind]
+    x_left, a_left, z_left = left.shape
+    _, rows, cols, a_right = core.shape
+    x_right, _, z_right = right.shape
+    # (j a | i) (i | l m) -> (j, a, l, m)
+    step = left.transpose(2, 1, 0).reshape(z_left * a_left, x_left)
+    step = step @ x_core.reshape(x_left, cols * x_right)
+    # (j m | a l) (a l | k b) -> (j, m, k, b)
+    step = step.reshape(z_left, a_left, cols, x_right).transpose(0, 3, 1, 2)
+    step = step.reshape(z_left * x_right, a_left * cols) @ core.transpose(
+        0, 2, 1, 3
+    ).reshape(a_left * cols, rows * a_right)
+    # (j k | m b) (m b | n) -> (j, k, n)
+    step = step.reshape(z_left, x_right, rows, a_right).transpose(0, 2, 1, 3)
+    step = step.reshape(z_left * rows, x_right * a_right) @ right.reshape(
+        x_right * a_right, z_right
     )
-    return b_part - ax_part
+    return b_part - step.reshape(z_left, rows, z_right)
 
 
 def fit_residual_train(
