@@ -181,15 +181,17 @@ orthonormalization and SVD-based truncation.
 
 ## Benchmarks
 
-The `benchmarks/` directory holds a runner that measures the tensor-train
-solvers against classical sparse baselines on the Poisson equation
-$-\Delta u = f$ on the unit square, discretized with finite differences and
-solved on a $2^n \times 2^n$ grid.
+The `benchmarks/` directory holds two runners. `benchmarks.poisson` measures
+the tensor-train solvers against classical sparse baselines on the Poisson
+equation $-\Delta u = f$ on the unit square, discretized with finite
+differences and solved on a $2^n \times 2^n$ grid. `benchmarks.arithmetic`
+measures the arithmetic of tensor trains (see
+[Arithmetic benchmark](#arithmetic-benchmark)).
 
 The benchmarks run in GitLab CI, not on GitHub. Every commit on `main` runs
-the suite at depths 7 to 10 ($128 \times 128$ to $1024 \times 1024$ grids).
-The pipeline keeps the Markdown and JSON reports as job artifacts for 30
-days.
+the Poisson suite at depths 7 to 10 ($128 \times 128$ to $1024 \times 1024$
+grids), then the arithmetic benchmark with its default settings. The pipeline
+keeps the Markdown and JSON reports as job artifacts for 30 days.
 
 ### Running
 
@@ -228,6 +230,35 @@ The five rows are:
   `failed: <ExceptionType>`, so a single bad backend never aborts the suite.
 - **notes** — what the backend did to get there: sweeps and the largest bond
   dimension reached for the TT solvers, iteration count for the classical ones.
+
+### Arithmetic benchmark
+
+```bash
+python -m benchmarks.arithmetic --output-dir benchmark-results
+```
+
+It writes `arithmetic_benchmark.md` and `arithmetic_benchmark.json` with two
+tables:
+
+- **Accuracy and memory.** Products, sums, the finite element mass matrix
+  applied to a vector and a polynomial of a vector, on QTT vectors of
+  $2^{16}$ to $2^{40}$ entries, rounded with the direct method at a relative
+  error of $10^{-10}$. Each row gives the largest bond, the memory of the
+  train and of the dense vector, their ratio and the error against NumPy.
+  NumPy computes every entry up to $2^{24}$ entries, a random sample of
+  entries above.
+- **Speed.** Sums, element-wise products, an operator applied to a vector and
+  long trains, rounded by the direct and the randomized method with the same
+  `max_rank`. Each row gives the median time of both, the speed-up and the
+  errors. The error of the randomized method is taken over several seeds.
+
+| Option | Meaning |
+| --- | --- |
+| `--tables accuracy speed` | Tables to produce (default: both) |
+| `--cores N [N ...]` | Accuracy table: binary cores, the vectors have $2^N$ entries |
+| `--dense-max-cores`, `--samples` | Accuracy table: largest size NumPy computes in full, random entries above it |
+| `--rounds`, `--seeds` | Speed table: timing rounds, seeds of the randomized method |
+| `--output-dir` | Where the Markdown and JSON reports are written |
 
 ## Development
 

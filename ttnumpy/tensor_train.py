@@ -55,6 +55,42 @@ def _update_bonds(tt: "TensorTrain") -> List[int]:
     return [tt.cores[i].shape[0] for i in range(tt.n_cores)] + [1]
 
 
+def _contract_cores(cores: List[np.ndarray]) -> np.ndarray:
+    """Product of consecutive 4-D cores as a matrix.
+
+    Rows are ordered by left bond, row_1, col_1, row_2, col_2 and so on.
+    Columns are the right bond.
+    """
+    tensor = cores[0].reshape(-1, cores[0].shape[-1])
+    for core in cores[1:]:
+        tensor = (tensor @ core.reshape(core.shape[0], -1)).reshape(-1, core.shape[-1])
+    return tensor
+
+
+def _merge_cores(cores: List[np.ndarray]) -> np.ndarray:
+    """Product of consecutive 4-D cores as one core.
+
+    The result is indexed (left bond, rows, columns, right bond), with the
+    row modes of the cores merged into one mode and the column modes into
+    another.
+    """
+    left, right = cores[0].shape[0], cores[-1].shape[-1]
+    row_modes = [core.shape[1] for core in cores]
+    col_modes = [core.shape[2] for core in cores]
+    modes = [x for pair in zip(row_modes, col_modes) for x in pair]
+    # the transpose leaves out the modes of size 1, so the number of axes
+    # stays within NumPy's limit for any result that fits in memory
+    kept = [axis for axis, mode in enumerate(modes) if mode > 1]
+    permute = [1 + i for i, axis in enumerate(kept) if axis % 2 == 0]
+    permute += [1 + i for i, axis in enumerate(kept) if axis % 2 == 1]
+    tensor = _contract_cores(cores).reshape(
+        [left] + [modes[axis] for axis in kept] + [right]
+    )
+    return tensor.transpose([0] + permute + [len(kept) + 1]).reshape(
+        left, prod(row_modes), prod(col_modes), right
+    )
+
+
 def _round_result(
     result: "TensorTrain",
     truncate: bool,
@@ -127,6 +163,10 @@ class TensorTrain:
     - Matrix product state basics https://arxiv.org/abs/1008.3477;
     - Tensor train https://epubs.siam.org/doi/abs/10.1137/090752286
     """
+
+    # NumPy operands on the left, as in ``np.float64(2.0) * train``, return
+    # NotImplemented, so Python calls the reflected operator of the train
+    __array_ufunc__ = None
 
     def __init__(self, cores: List[np.ndarray]):
         """Initialize a tensor train.
@@ -556,15 +596,6 @@ class TensorTrain:
 
         return contraction.item()
 
-    def _contract_cores(self) -> np.ndarray:
-        """Entries of the train as a vector, ordered row_1, col_1, row_2, col_2, ..."""
-        tensor = self.cores[0].reshape(-1, self.cores[0].shape[-1])
-        for core in self.cores[1:]:
-            tensor = (tensor @ core.reshape(core.shape[0], -1)).reshape(
-                -1, core.shape[-1]
-            )
-        return tensor.reshape(-1)
-
     def get_full_tensor(self) -> np.ndarray:
         """Collapse train into full tensor.
 
@@ -573,7 +604,7 @@ class TensorTrain:
         If every dimension is 1, the single entry is returned as a scalar.
         """
 
-        tensor = self._contract_cores()
+        tensor = _contract_cores(self.cores).reshape(-1)
         shape = self.row_modes
         if self.tt_type == TensorTrainType.TTM:
             shape = [x for pair in zip(self.row_modes, self.col_modes) for x in pair]
@@ -601,18 +632,10 @@ class TensorTrain:
         A train whose dimensions are all 1 gives a vector of length 1.
         """
 
-        entries = self._contract_cores()
+        merged = _merge_cores(self.cores)
         if not self.is_ttm():
-            return entries
-
-        modes = [x for pair in zip(self.row_modes, self.col_modes) for x in pair]
-        kept = [axis for axis, mode in enumerate(modes) if mode > 1]
-        permute = [i for i, axis in enumerate(kept) if axis % 2 == 0]
-        permute += [i for i, axis in enumerate(kept) if axis % 2 == 1]
-        tensor = entries.reshape([modes[axis] for axis in kept])
-        return tensor.transpose(permute).reshape(
-            prod(self.row_modes), prod(self.col_modes)
-        )
+            return merged.reshape(-1)
+        return merged.reshape(prod(self.row_modes), prod(self.col_modes))
 
     def __str__(self):
         """Get main attributes of tensor train."""
@@ -776,9 +799,10 @@ class TensorTrain:
             error: Allowed truncation error. Defaults to ``0.0``.
             max_rank: Optional bound for the bond dimension.
             canonical: Canonical form to use. ``"left"`` performs a
-                left-to-right SVD sweep, ``"right"`` performs a
-                right-to-left sweep, and ``"auto"`` chooses the direction
-                from ``orth_center``.
+                left-to-right SVD sweep, ``"right"`` a right-to-left sweep.
+                ``"auto"`` starts the sweep at the end nearer to
+                ``orth_center``. It sweeps left-to-right on a tie or without
+                ``orth_center``.
             inplace: If ``True``, modify this tensor train in place.
 
         Raises:
@@ -794,7 +818,7 @@ class TensorTrain:
         if canonical == "auto":
             if (
                 tt_compressed.orth_center is None
-                or tt_compressed.orth_center <= tt_compressed.n_cores / 2
+                or tt_compressed.orth_center <= (tt_compressed.n_cores - 1) / 2
             ):
                 canonical = "left"
             else:
@@ -849,7 +873,8 @@ class TensorTrain:
         Args:
             error: Allowed error of truncation;
             max_rank: If given, set a bound for bond dimension;
-            canonical: Type of final canonical form. If "auto" (default), direction will be chosen based on orth_center position.
+            canonical: Type of final canonical form. If "auto" (default), direction
+                will be chosen based on orth_center position.
             inplace: If True, perform operation inplace (default=False);
             method: ``"direct"`` (default) orthonormalizes the train with QR
                 decompositions before the SVD truncation. ``"randomized"``
@@ -1099,37 +1124,9 @@ class TensorTrain:
             raise DimensionMismatch(
                 f"Physical indexes cover only {pos} of {self.n_cores} QTT cores"
             )
-        left_rank = 1
         stride = 0
-        for i, physical_index in enumerate(physical_indexes):
-            if self.is_ttm():
-                row_mode_size = physical_index[0]
-                col_mode_size = physical_index[1]
-            else:
-                row_mode_size = physical_index
-                col_mode_size = 1
-
-            big_core = self.cores[stride]
-            p = powers[i]
-            right_rank = self.bonds[p + stride]
-            for j in range(p - 1):
-                big_core = np.tensordot(
-                    big_core, self.cores[stride + j + 1], axes=(-1, 0)
-                )
-
-            if p > 1:
-                perm = (
-                    [0]
-                    + [1 + 2 * k for k in range(p)]
-                    + [1 + 2 * k + 1 for k in range(p)]
-                    + [1 + 2 * p]
-                )
-                big_core = big_core.transpose(tuple(perm))
-
-            tt_cores.append(
-                big_core.reshape(left_rank, row_mode_size, col_mode_size, right_rank)
-            )
-            left_rank = right_rank
+        for p in powers:
+            tt_cores.append(_merge_cores(self.cores[stride : stride + p]))
             stride += p
         tt = TensorTrain(tt_cores)
 

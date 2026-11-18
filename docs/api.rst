@@ -96,9 +96,11 @@ CLI, or configure the ``ttnumpy`` logger directly.
 Benchmarks
 ----------
 
-The benchmark harness: the Poisson problem in both sparse and TT form, and
-the runner that times the TT solvers against SciPy, PyAMG and PETSc. This
-is research and CI tooling rather than library API.
+The benchmark harness. ``benchmarks.poisson_problem`` builds the Poisson
+problem in sparse and TT form. ``benchmarks.poisson`` times the TT solvers
+against SciPy, PyAMG and PETSc. ``benchmarks.arithmetic`` measures the
+arithmetic of tensor trains. This is research and CI tooling rather than
+library API.
 
 .. automodule:: benchmarks.poisson_problem
    :members:
@@ -106,6 +108,11 @@ is research and CI tooling rather than library API.
    :show-inheritance:
 
 .. automodule:: benchmarks.poisson
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: benchmarks.arithmetic
    :members:
    :undoc-members:
    :show-inheritance:

@@ -565,6 +565,31 @@ class TestTTMethods(unittest.TestCase):
                 decimal=DECIMAL,
             )
 
+    def test_qtt_to_tt_merges_more_than_32_cores_into_one(self):
+        """A group of 33 or more cores fits only when most of its modes are 1."""
+        cases = (
+            (
+                tensor_train.rand([2] * 10 + [1] * 30 + [2] * 3, ranks=3, seed=7),
+                [1024, 8],
+            ),
+            (
+                tensor_train.rand(
+                    [(2, 2)] * 4 + [(1, 1)] * 30 + [(2, 1)] * 3 + [(2, 2)] * 2,
+                    ranks=2,
+                    seed=9,
+                ),
+                [(128, 16), (4, 4)],
+            ),
+        )
+        for qtt, physical_indexes in cases:
+            with self.subTest(tt_type=qtt.tt_type.name):
+                tt_back = qtt.qtt_to_tt(physical_indexes)
+
+                self.assertEqual(tt_back.physical_dims(), physical_indexes)
+                npt.assert_allclose(
+                    tt_back.matricize(), qtt.matricize(), rtol=1e-12, atol=1e-14
+                )
+
     def test_qtt_to_tt_validation(self):
         """qtt_to_tt must reject indexes that do not match the QTT cores."""
         tt = tensor_train.rand(physical_indexes=[4, 4, 4], ranks=3, seed=125)
@@ -1154,7 +1179,7 @@ class TestTTOperations(unittest.TestCase):
             tt_prod = ttm @ tt_vec
 
     def test_scalar_product_accepts_numpy_scalars(self):
-        """NumPy scalars must scale a train like their Python counterparts.
+        """NumPy scalars on either side of ``*`` scale a train like Python ones.
 
         ``np.float64`` and ``np.complex128`` subclass ``float``/``complex``, but
         ``np.int64`` subclasses neither, so an isinstance check against the
@@ -1177,13 +1202,15 @@ class TestTTOperations(unittest.TestCase):
             3 + 0j,
             np.complex128(3),
         ):
-            with self.subTest(scalar=type(scalar).__name__):
-                npt.assert_allclose(
-                    (tt_rand * scalar).get_full_tensor(),
-                    reference,
-                    rtol=1e-12,
-                    atol=1e-12,
-                )
+            for side, product in (
+                ("right", tt_rand * scalar),
+                ("left", scalar * tt_rand),
+            ):
+                with self.subTest(scalar=type(scalar).__name__, side=side):
+                    self.assertIsInstance(product, tensor_train.TensorTrain)
+                    npt.assert_allclose(
+                        product.get_full_tensor(), reference, rtol=1e-12, atol=1e-12
+                    )
 
     def test_scalar_product_rejects_non_numbers(self):
         """A non-numeric operand must still fail fast."""
@@ -1758,6 +1785,30 @@ class TestTTInspection(unittest.TestCase):
         npt.assert_allclose(
             truncated.get_full_tensor(), reference, rtol=1e-9, atol=1e-11
         )
+
+    def test_truncate_on_two_cores_keeps_the_leading_singular_values(self):
+        rng = np.random.default_rng(19)
+        left, _ = np.linalg.qr(rng.standard_normal((30, 6)))
+        right, _ = np.linalg.qr(rng.standard_normal((30, 6)))
+        sigma, mix = 0.5 ** np.arange(6), rng.standard_normal((6, 6))
+        # the mixing matrix leaves neither core orthonormal
+        train = tensor_train.TensorTrain(
+            [
+                ((left * sigma) @ mix).reshape(1, 30, 1, 6),
+                np.linalg.solve(mix, right.T).reshape(6, 30, 1, 1),
+            ]
+        )
+        matrix = train.matricize()
+        best = np.linalg.norm(sigma[2:]) / np.linalg.norm(sigma)
+
+        for canonical in ("auto", "left", "right"):
+            with self.subTest(canonical=canonical):
+                capped = train.truncate(max_rank=2, canonical=canonical)
+                rounded = train.truncate(error=0.2, canonical=canonical)
+
+                error = np.linalg.norm(capped.matricize() - matrix)
+                self.assertAlmostEqual(error / np.linalg.norm(matrix), best)
+                self.assertEqual(rounded.bonds, [1, 3, 1])
 
 
 class TestTTMatricize(unittest.TestCase):
